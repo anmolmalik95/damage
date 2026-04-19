@@ -99,8 +99,10 @@ export default function UploadReceipts() {
           })
       );
 
-      const apiBase = import.meta.env.DEV ? 'http://localhost:3001' : '';
-      const res = await fetch(`${apiBase}/api/parse-receipt`, {
+      const apiUrl = import.meta.env.DEV
+        ? 'http://localhost:3001/api/parse-receipt'
+        : '/api/parse-receipt';
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, venues: venuePayloads }),
