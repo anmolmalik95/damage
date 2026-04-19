@@ -1,0 +1,547 @@
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useToast } from '../context/ToastContext';
+import SkeletonBlock from '../components/SkeletonBlock';
+import {
+  collection, doc, getDocs, onSnapshot, setDoc, updateDoc, serverTimestamp,
+} from 'firebase/firestore';
+import { db } from '../firebase';
+import PageContainer from '../components/PageContainer';
+
+const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
+
+export default function Breakdown() {
+  const { sessionId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { showToast } = useToast();
+
+  const currentMemberId = localStorage.getItem(`member_${sessionId}`);
+  const isReadOnly = !currentMemberId;
+
+  const [session, setSession] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [venues, setVenues] = useState([]);
+  const [claims, setClaims] = useState([]);
+  const [paidStatus, setPaidStatus] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [expandedCards, setExpandedCards] = useState(() => new Set(currentMemberId ? [currentMemberId] : []));
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [closeStep, setCloseStep] = useState(0);
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    document.title = session?.name ? `Breakdown · ${session.name} — Unfuck` : 'Unfuck';
+  }, [session?.name]);
+
+  function toggleCard(memberId) {
+    setExpandedCards(p => { const n = new Set(p); n.has(memberId) ? n.delete(memberId) : n.add(memberId); return n; });
+  }
+
+  const loadStateRef = useRef({ session: false, venues: false });
+  function checkLoaded() {
+    if (loadStateRef.current.session && loadStateRef.current.venues) setLoading(false);
+  }
+
+  useEffect(() => {
+    const unsubs = [
+      onSnapshot(doc(db, 'sessions', sessionId), snap => {
+        if (snap.exists()) {
+          setSession({ id: snap.id, ...snap.data() });
+          if (!loadStateRef.current.session) { loadStateRef.current.session = true; checkLoaded(); }
+        }
+      }),
+      onSnapshot(collection(db, 'sessions', sessionId, 'members'), snap => {
+        setMembers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }),
+      onSnapshot(collection(db, 'sessions', sessionId, 'claims'), snap => {
+        setClaims(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }),
+      onSnapshot(collection(db, 'sessions', sessionId, 'breakdown'), snap => {
+        const st = {};
+        snap.docs.forEach(d => { st[d.id] = d.data(); });
+        setPaidStatus(st);
+      }),
+    ];
+
+    getDocs(collection(db, 'sessions', sessionId, 'venues')).then(async venuesSnap => {
+      const venueList = await Promise.all(
+        venuesSnap.docs.map(async vDoc => {
+          const itemsSnap = await getDocs(
+            collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items')
+          );
+          return { id: vDoc.id, ...vDoc.data(), items: itemsSnap.docs.map(d => ({ id: d.id, ...d.data() })) };
+        })
+      );
+      setVenues(venueList);
+      loadStateRef.current.venues = true;
+      checkLoaded();
+    });
+
+    return () => unsubs.forEach(u => u());
+  }, [sessionId]);
+
+  // Compute per-venue per-member breakdown data
+  function computeVenueData(venue) {
+    const memberSubtotals = {};
+    const claimsForItem = {};
+
+    for (const item of venue.items) {
+      const itemClaims = claims.filter(c => c.itemId === item.id);
+      claimsForItem[item.id] = itemClaims;
+      for (const claim of itemClaims) {
+        if (claim.type === 'whole') {
+          memberSubtotals[claim.memberId] = (memberSubtotals[claim.memberId] || 0) + (item.unitPrice ?? 0);
+        } else if (claim.type === 'shared') {
+          const n = claim.sharedWith?.length || 1;
+          (claim.sharedWith || []).forEach(mid => {
+            memberSubtotals[mid] = (memberSubtotals[mid] || 0) + (item.unitPrice ?? 0) / n;
+          });
+        }
+      }
+    }
+
+    const totalSub = Object.values(memberSubtotals).reduce((a, b) => a + b, 0);
+    const result = {};
+
+    for (const [memberId, sub] of Object.entries(memberSubtotals)) {
+      if (!sub) continue;
+      const ratio = totalSub > 0 ? sub / totalSub : 0;
+      const gst = ratio * (venue.gstAmount || 0);
+      const sc = ratio * (venue.serviceChargeAmount || 0);
+
+      const itemRows = [];
+      for (const item of venue.items) {
+        const myWhole = (claimsForItem[item.id] || []).filter(c => c.type === 'whole' && c.memberId === memberId);
+        const myShared = (claimsForItem[item.id] || []).filter(c => c.type === 'shared' && c.sharedWith?.includes(memberId));
+        if (myWhole.length > 0) {
+          itemRows.push({ name: item.name, amount: (item.unitPrice ?? 0) * myWhole.length, count: myWhole.length });
+        }
+        for (const claim of myShared) {
+          const otherNames = (claim.sharedWith || [])
+            .filter(mid => mid !== memberId)
+            .map(mid => members.find(m => m.id === mid)?.name ?? '?');
+          itemRows.push({ name: item.name, amount: (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1), otherNames });
+        }
+      }
+
+      result[memberId] = { subtotal: sub, gst, sc, total: sub + gst + sc, itemRows };
+    }
+    return result;
+  }
+
+  async function togglePaid(memberId) {
+    const cur = paidStatus[memberId]?.paid ?? false;
+    await setDoc(doc(db, 'sessions', sessionId, 'breakdown', memberId), {
+      paid: !cur,
+      paidAt: !cur ? serverTimestamp() : null,
+    });
+  }
+
+  async function handleClose() {
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId), { status: 'closed', closedAt: serverTimestamp() });
+      setCloseStep(0);
+    } catch (err) { console.error(err); }
+    setSaving(false);
+  }
+
+  async function handleReopen() {
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId), { status: 'open' });
+      navigate(`/session/${sessionId}/claim`);
+    } catch (err) { console.error(err); }
+    setSaving(false);
+  }
+
+  async function handleRenameSave() {
+    const name = renameValue.trim();
+    if (!name) return;
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId), { name });
+      setRenameOpen(false);
+      showToast('Session renamed', 'success');
+    } catch (err) { console.error(err); }
+  }
+
+  function handleCopyLink() {
+    navigator.clipboard.writeText(`https://unfuck.malik.codes/s/${sessionId}/breakdown`);
+    showToast('Copied!', 'success');
+  }
+
+  if (loading || !session) return (
+    <PageContainer>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '24px' }}>
+        <SkeletonBlock width="20px" height="20px" borderRadius="4px" />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <SkeletonBlock width="120px" height="20px" />
+          <SkeletonBlock width="180px" height="13px" />
+        </div>
+      </div>
+      {[0,1,2].map(i => (
+        <div key={i} style={{ backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', padding: '12px', marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <SkeletonBlock width="24px" height="24px" borderRadius="50%" />
+              <SkeletonBlock width="90px" height="15px" />
+            </div>
+            <SkeletonBlock width="50px" height="17px" />
+          </div>
+          <SkeletonBlock width="70%" height="13px" />
+          <SkeletonBlock width="50%" height="13px" />
+        </div>
+      ))}
+    </PageContainer>
+  );
+
+  const currentMember = members.find(m => m.id === currentMemberId);
+  const isAdmin = !isReadOnly && (currentMember?.isCreator || session.billPayer === currentMemberId);
+  const isClosed = session.status === 'closed';
+  const totalBill = venues.reduce((sum, v) => {
+    const itemsTotal = v.items.reduce((s, i) => s + (i.unitPrice ?? 0) * (i.quantity ?? 1), 0);
+    return sum + itemsTotal + (v.gstAmount || 0) + (v.serviceChargeAmount || 0);
+  }, 0);
+
+  // Pre-compute all venue data for rendering
+  const venueDataMap = venues.map(v => ({ venue: v, memberData: computeVenueData(v) }));
+
+  // Grand totals with penny-rounding adjustment
+  const grandTotals = {};
+  for (const { memberData } of venueDataMap) {
+    for (const [mid, d] of Object.entries(memberData)) {
+      grandTotals[mid] = (grandTotals[mid] || 0) + d.total;
+    }
+  }
+  const computedSum = Object.values(grandTotals).reduce((a, b) => a + b, 0);
+  const discrepancyCents = Math.round((totalBill - computedSum) * 100);
+  if (discrepancyCents !== 0 && members.length > 0) {
+    const firstMember = [...members].sort((a, b) => a.name.localeCompare(b.name))[0];
+    if (grandTotals[firstMember.id] !== undefined) {
+      grandTotals[firstMember.id] += discrepancyCents / 100;
+    }
+  }
+
+  const memberIndex = Object.fromEntries(members.map((m, i) => [m.id, i]));
+
+  return (
+    <PageContainer>
+      {/* Header */}
+      <div style={s.header}>
+        <button style={s.back} onClick={() => navigate(location.state?.from === 'claim' ? `/session/${sessionId}/claim` : '/existing-sessions')}>←</button>
+        <div style={s.headerText}>
+          <div style={s.title}>Bill breakdown</div>
+          <div style={s.subtitle}>{session.name} · ${totalBill.toFixed(2)}</div>
+        </div>
+        {isAdmin && (
+          <button style={s.menuBtn} onClick={() => setMenuOpen(true)}>•••</button>
+        )}
+      </div>
+
+      {/* Status badge + helper */}
+      <div style={s.statusRow}>
+        <span style={isClosed ? s.closedBadge : s.lockedBadge}>
+          {isClosed ? 'Closed' : 'Locked'}
+        </span>
+        <span style={s.taxHelper}>Tax split proportionally per venue.</span>
+      </div>
+
+      {/* Per-venue sections */}
+      {venueDataMap.map(({ venue, memberData }) => {
+        const membersWithItems = members.filter(m => memberData[m.id]);
+        if (!membersWithItems.length) return null;
+
+        return (
+          <div key={venue.id} style={s.venueGroup}>
+            <div style={s.venueLabel}>{venue.name.toUpperCase()}</div>
+
+            {membersWithItems.map(member => {
+              const d = memberData[member.id];
+              const paid = paidStatus[member.id]?.paid ?? false;
+              const isMe = member.id === currentMemberId;
+              const avatarColor = AVATAR_COLORS[memberIndex[member.id] % AVATAR_COLORS.length];
+
+              const isExpanded = expandedCards.has(member.id);
+              return (
+                <div key={member.id} style={s.memberCard}>
+                  {/* Card header — clickable to expand/collapse */}
+                  <div style={{ ...s.cardHeader, cursor: 'pointer' }} onClick={() => toggleCard(member.id)}>
+                    <div style={s.cardLeft}>
+                      <div style={{ ...s.avatar, backgroundColor: avatarColor }}>
+                        {member.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span style={s.memberName}>
+                        {member.name}{isMe ? ' (you)' : ''}
+                      </span>
+                      {session.billPayer === member.id && (
+                        <span style={s.billPayerPill}>Bill Payer</span>
+                      )}
+                    </div>
+                    <div style={s.cardRight}>
+                      <span style={s.venueTotal}>${d.total.toFixed(2)}</span>
+                      <span style={s.cardChevron}>{isExpanded ? '⌄' : '›'}</span>
+                      {!isReadOnly && isAdmin && !isClosed && (
+                        <button
+                          style={paid ? s.paidBtn : s.markPaidBtn}
+                          onClick={e => { e.stopPropagation(); togglePaid(member.id); }}
+                        >
+                          {paid ? 'Paid ✓' : 'Mark paid'}
+                        </button>
+                      )}
+                      {(isReadOnly || !isAdmin) && paid && (
+                        <span style={s.paidTag}>Paid ✓</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Item rows — only when expanded */}
+                  {isExpanded && (
+                    <>
+                      {d.itemRows.map((row, i) => (
+                        <div key={i} style={s.itemRow}>
+                          <div style={s.itemLeft}>
+                            <span style={s.itemName}>
+                              {row.name}{row.count > 1 ? ` ×${row.count}` : ''}
+                            </span>
+                            {row.otherNames?.length > 0 && (
+                              <span style={s.sharedWith}>with {row.otherNames.join(', ')}</span>
+                            )}
+                          </div>
+                          <span style={s.itemAmt}>${row.amount.toFixed(2)}</span>
+                        </div>
+                      ))}
+
+                      {/* GST / service charge sub-rows */}
+                      {(d.gst > 0.005 || d.sc > 0.005) && (
+                        <div style={s.taxRows}>
+                          {d.gst > 0.005 && (
+                            <div style={s.taxRow}>
+                              <span style={s.taxLabel}>
+                                GST{venue.gstPercent != null ? ` (${venue.gstPercent}%)` : ''}
+                              </span>
+                              <span style={s.taxAmt}>${d.gst.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {d.sc > 0.005 && (
+                            <div style={s.taxRow}>
+                              <span style={s.taxLabel}>
+                                Service charge{venue.serviceChargePercent != null ? ` (${venue.serviceChargePercent}%)` : ''}
+                              </span>
+                              <span style={s.taxAmt}>${d.sc.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {/* Bottom buttons */}
+      <div style={s.bottomBtns}>
+        <button style={s.shareBtn} onClick={handleCopyLink}>
+          Share breakdown link
+        </button>
+
+        {!isReadOnly && isAdmin && !isClosed && (
+          <button style={s.reopenBtn} onClick={() => setReopenOpen(true)}>
+            Reopen for changes
+          </button>
+        )}
+        {!isReadOnly && isAdmin && isClosed && (
+          <button style={s.reopenBtn} onClick={() => setReopenOpen(true)}>
+            Reopen for changes
+          </button>
+        )}
+        {!isReadOnly && isAdmin && !isClosed && (
+          <button style={s.closeBtn} onClick={() => setCloseStep(1)}>
+            Close session
+          </button>
+        )}
+      </div>
+
+      {/* Reopen confirmation sheet */}
+      {reopenOpen && (
+        <div style={s.backdrop} onClick={() => setReopenOpen(false)}>
+          <div style={s.sheet} onClick={e => e.stopPropagation()}>
+            <div style={s.sheetHandle} />
+            <div style={s.sheetTitle}>Reopen for changes?</div>
+            <div style={s.sheetBody}>
+              Members will be able to edit their claims again.
+            </div>
+            <button
+              style={{ ...s.sheetBtn, backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', opacity: saving ? 0.6 : 1 }}
+              onClick={handleReopen}
+              disabled={saving}
+            >
+              {saving ? 'Reopening…' : 'Yes, reopen'}
+            </button>
+            <button
+              style={{ ...s.sheetBtn, backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', marginTop: '8px' }}
+              onClick={() => setReopenOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Close session — step 1 */}
+      {closeStep === 1 && (
+        <div style={s.backdrop} onClick={() => setCloseStep(0)}>
+          <div style={s.sheet} onClick={e => e.stopPropagation()}>
+            <div style={s.sheetHandle} />
+            <div style={s.sheetTitle}>Close this session?</div>
+            <div style={s.sheetBody}>
+              Once closed, members can no longer view or change claims. The breakdown will be locked permanently.
+            </div>
+            <button
+              style={{ ...s.sheetBtn, backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)' }}
+              onClick={() => setCloseStep(2)}
+            >
+              Continue
+            </button>
+            <button
+              style={{ ...s.sheetBtn, backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', marginTop: '8px' }}
+              onClick={() => setCloseStep(0)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Close session — step 2 (final confirmation) */}
+      {closeStep === 2 && (
+        <div style={s.backdrop} onClick={() => setCloseStep(0)}>
+          <div style={s.sheet} onClick={e => e.stopPropagation()}>
+            <div style={s.sheetHandle} />
+            <div style={s.sheetTitle}>Are you absolutely sure?</div>
+            <div style={s.sheetBody}>
+              This cannot be undone without reopening the session manually.
+            </div>
+            <button
+              style={{ ...s.sheetBtn, backgroundColor: 'var(--color-danger)', color: '#fff', opacity: saving ? 0.6 : 1 }}
+              onClick={handleClose}
+              disabled={saving}
+            >
+              {saving ? 'Closing…' : 'Yes, close session'}
+            </button>
+            <button
+              style={{ ...s.sheetBtn, backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', marginTop: '8px' }}
+              onClick={() => setCloseStep(0)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Three-dot menu sheet */}
+      {menuOpen && (
+        <>
+          <div style={s.sheetBackdrop} onClick={() => setMenuOpen(false)} />
+          <div style={s.menuSheet}>
+            <div style={s.sheetHandle} />
+            <div
+              style={s.menuOption}
+              onClick={() => { setMenuOpen(false); setRenameValue(session.name ?? ''); setRenameOpen(true); }}
+            >
+              <span style={s.menuOptionIcon}>✏️</span>
+              <span style={s.menuOptionLabel}>Rename session</span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Rename session sheet */}
+      {renameOpen && (
+        <>
+          <div style={s.sheetBackdrop} onClick={() => setRenameOpen(false)} />
+          <div style={s.menuSheet}>
+            <div style={s.sheetHandle} />
+            <div style={s.renameTitle}>Rename session</div>
+            <input
+              autoFocus
+              style={s.renameInput}
+              value={renameValue}
+              maxLength={50}
+              onChange={e => setRenameValue(e.target.value)}
+              placeholder="Session name"
+              onKeyDown={e => e.key === 'Enter' && handleRenameSave()}
+            />
+            <div style={s.renameCounter}>{renameValue.length}/50</div>
+            <div style={s.renameBtns}>
+              <button style={s.cancelBtn} onClick={() => setRenameOpen(false)}>Cancel</button>
+              <button style={s.saveBtn} onClick={handleRenameSave}>Save</button>
+            </div>
+          </div>
+        </>
+      )}
+    </PageContainer>
+  );
+}
+
+const s = {
+  header: { display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '12px' },
+  back: { background: 'none', border: 'none', fontSize: '20px', color: 'var(--text-primary)', cursor: 'pointer', padding: '0', lineHeight: 1.6 },
+  menuBtn: { background: 'none', border: 'none', fontSize: '14px', color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '1px', padding: '4px', alignSelf: 'center' },
+  sheetBackdrop: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100 },
+  menuSheet: { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 101, backgroundColor: 'var(--bg-primary)', borderRadius: '20px 20px 0 0', padding: '12px 20px 40px' },
+  menuOption: { display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 0', cursor: 'pointer' },
+  menuOptionIcon: { fontSize: '16px', width: '22px', textAlign: 'center', flexShrink: 0 },
+  menuOptionLabel: { fontSize: '14px', fontFamily: 'system-ui, -apple-system, sans-serif', color: 'var(--text-primary)' },
+  renameTitle: { fontSize: '15px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' },
+  renameInput: { width: '100%', padding: '10px 12px', fontSize: '15px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', outline: 'none', boxSizing: 'border-box', colorScheme: 'light dark', marginBottom: '6px' },
+  renameCounter: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', textAlign: 'right', marginBottom: '16px' },
+  renameBtns: { display: 'flex', gap: '10px' },
+  cancelBtn: { flex: 1, padding: '12px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' },
+  saveBtn: { flex: 1, padding: '12px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)', border: 'none', borderRadius: '8px', cursor: 'pointer' },
+  headerText: { flex: 1, minWidth: 0 },
+  title: { fontSize: '20px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  subtitle: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '3px' },
+  statusRow: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' },
+  lockedBadge: { fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '20px', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
+  closedBadge: { fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '20px', backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
+  taxHelper: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  venueGroup: { marginBottom: '20px' },
+  venueLabel: { fontSize: '11px', fontWeight: 500, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
+  memberCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', padding: '12px', marginBottom: '8px', overflow: 'hidden' },
+  cardHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' },
+  cardLeft: { display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflow: 'hidden' },
+  cardRight: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
+  cardChevron: { fontSize: '16px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1, flexShrink: 0 },
+  avatar: { width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700, color: '#fff', flexShrink: 0, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  memberName: { fontSize: '15px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  billPayerPill: { fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '4px', backgroundColor: '#FAEEDA', color: '#633806', fontFamily: 'system-ui, -apple-system, sans-serif', display: 'inline-block', verticalAlign: 'middle', marginLeft: '6px', flexShrink: 0, whiteSpace: 'nowrap' },
+  venueTotal: { fontSize: '17px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
+  markPaidBtn: { backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '6px 14px', fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', flexShrink: 0 },
+  paidBtn: { backgroundColor: '#EAF3DE', border: 'none', borderRadius: '6px', padding: '6px 14px', fontSize: '12px', fontWeight: 500, color: '#27500A', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', flexShrink: 0 },
+  paidTag: { fontSize: '12px', fontWeight: 500, padding: '6px 14px', borderRadius: '6px', backgroundColor: '#EAF3DE', color: '#27500A', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
+  itemRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '5px' },
+  itemLeft: { display: 'flex', flexDirection: 'column', flex: 1, paddingRight: '8px' },
+  itemName: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  sharedWith: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '1px' },
+  itemAmt: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
+  taxRows: { borderTop: '0.5px solid var(--border-color)', marginTop: '6px', paddingTop: '6px' },
+  taxRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' },
+  taxLabel: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  taxAmt: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  bottomBtns: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingBottom: '16px' },
+  shareBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 600, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', border: 'none', borderRadius: '8px', cursor: 'pointer' },
+  reopenBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' },
+  closeBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--color-danger)', border: '0.5px solid var(--color-danger)', borderRadius: '8px', cursor: 'pointer' },
+  backdrop: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' },
+  sheet: { width: '100%', maxWidth: '480px', backgroundColor: 'var(--bg-primary)', borderRadius: '16px 16px 0 0', padding: '12px 16px 36px' },
+  sheetHandle: { width: '36px', height: '4px', borderRadius: '2px', backgroundColor: 'var(--border-color)', margin: '0 auto 16px' },
+  sheetTitle: { fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
+  sheetBody: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '20px', lineHeight: 1.5 },
+  sheetBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'block' },
+};

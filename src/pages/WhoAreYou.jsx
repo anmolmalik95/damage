@@ -1,0 +1,254 @@
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import SkeletonBlock from '../components/SkeletonBlock';
+import { doc, getDoc, getDocs, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
+import PageContainer from '../components/PageContainer';
+
+const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
+
+export default function WhoAreYou() {
+  const { sessionId } = useParams();
+  const navigate = useNavigate();
+
+  const [session, setSession] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [showNewInput, setShowNewInput] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [continuing, setContinuing] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const existingId = localStorage.getItem(`member_${sessionId}`);
+    if (existingId) {
+      navigate(`/session/${sessionId}/claim`, { replace: true });
+      return;
+    }
+
+    async function load() {
+      const snap = await getDoc(doc(db, 'sessions', sessionId));
+      if (!snap.exists()) { setLoading(false); return; }
+      const data = snap.data();
+      setSession(data);
+
+      if (data.status === 'closed') {
+        navigate(`/session/${sessionId}/breakdown`, { replace: true });
+        return;
+      }
+
+      const mSnap = await getDocs(collection(db, 'sessions', sessionId, 'members'));
+      setMembers(mSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    }
+
+    load();
+  }, [sessionId, navigate]);
+
+  async function handleAddNew() {
+    const name = newName.trim();
+    if (!name) return;
+    setAdding(true);
+    try {
+      const ref = await addDoc(collection(db, 'sessions', sessionId, 'members'), {
+        name, joinedAt: serverTimestamp(), isCreator: false,
+      });
+      const newMember = { id: ref.id, name, isCreator: false };
+      setMembers(prev => [...prev, newMember]);
+      setSelectedId(ref.id);
+      setShowNewInput(false);
+      setNewName('');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleContinue() {
+    const member = members.find(m => m.id === selectedId);
+    if (!member) return;
+    localStorage.setItem(`member_${sessionId}`, member.id);
+    localStorage.setItem(`memberName_${sessionId}`, member.name);
+
+    setContinuing(true);
+    try {
+      const claimsSnap = await getDocs(collection(db, 'sessions', sessionId, 'claims'));
+      const hasClaimsForUser = claimsSnap.docs.some(d => {
+        const data = d.data();
+        return data.memberId === member.id || data.sharedWith?.includes(member.id);
+      });
+      navigate(`/session/${sessionId}/${hasClaimsForUser ? 'joining' : 'claim'}`);
+    } catch {
+      navigate(`/session/${sessionId}/claim`);
+    }
+  }
+
+  useEffect(() => {
+    document.title = session?.name ? `${session.name} — Unfuck` : 'Unfuck';
+  }, [session?.name]);
+
+  const formattedDate = session?.date
+    ? new Date(session.date + 'T00:00:00').toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '';
+
+  if (loading) return (
+    <PageContainer>
+      <div style={{ marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <SkeletonBlock width="180px" height="22px" />
+        <SkeletonBlock width="100px" height="13px" />
+      </div>
+      <SkeletonBlock width="80px" height="16px" style={{ marginBottom: '4px' }} />
+      <SkeletonBlock width="160px" height="12px" style={{ marginBottom: '16px' }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        {[0,1,2,3].map(i => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 12px 12px 10px' }}>
+            <SkeletonBlock width="26px" height="26px" borderRadius="50%" />
+            <SkeletonBlock width={`${80 + i * 20}px`} height="13px" />
+          </div>
+        ))}
+      </div>
+    </PageContainer>
+  );
+
+  return (
+    <PageContainer>
+      <div style={styles.header}>
+        <div style={styles.sessionName}>{session?.name}</div>
+        {formattedDate && <div style={styles.sessionDate}>{formattedDate}</div>}
+      </div>
+
+      <div style={styles.prompt}>Who are you?</div>
+      <div style={styles.helper}>Pick yourself from the list below.</div>
+
+      <div style={styles.memberList}>
+        {members.map((member, idx) => {
+          const isSelected = selectedId === member.id;
+          return (
+            <div
+              key={member.id}
+              style={{
+                ...styles.memberRow,
+                backgroundColor: isSelected ? 'var(--bg-secondary)' : 'transparent',
+                borderLeft: isSelected ? '3px solid var(--text-primary)' : '3px solid transparent',
+              }}
+              onClick={() => { setSelectedId(member.id); setShowNewInput(false); }}
+            >
+              <div style={{ ...styles.avatar, backgroundColor: AVATAR_COLORS[idx % AVATAR_COLORS.length] }}>
+                {member.name.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div style={styles.memberName}>{member.name}</div>
+                {isSelected && <div style={styles.selectedLabel}>Selected</div>}
+              </div>
+            </div>
+          );
+        })}
+
+        {showNewInput ? (
+          <div style={styles.newInputRow}>
+            <input
+              autoFocus
+              style={styles.newInput}
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="Your name..."
+              onKeyDown={e => e.key === 'Enter' && handleAddNew()}
+            />
+            <button style={styles.addBtn} onClick={handleAddNew} disabled={adding}>
+              {adding ? '…' : 'Add'}
+            </button>
+          </div>
+        ) : (
+          <div
+            style={styles.newPersonRow}
+            onClick={() => { setShowNewInput(true); setSelectedId(null); }}
+          >
+            <div style={styles.avatarDashed}>+</div>
+            <div style={{ ...styles.memberName, color: 'var(--text-secondary)' }}>I'm someone new</div>
+          </div>
+        )}
+      </div>
+
+      {selectedId && (
+        <button
+          style={{ ...styles.continueBtn, opacity: continuing ? 0.6 : 1 }}
+          onClick={handleContinue}
+          disabled={continuing}
+        >
+          {continuing ? 'Loading…' : `Continue as ${members.find(m => m.id === selectedId)?.name}`}
+        </button>
+      )}
+    </PageContainer>
+  );
+}
+
+const styles = {
+  header: { marginBottom: '24px' },
+  sessionName: {
+    fontSize: '22px', fontWeight: 500, color: 'var(--text-primary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+  },
+  sessionDate: {
+    fontSize: '13px', color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '2px',
+  },
+  prompt: {
+    fontSize: '16px', fontWeight: 500, color: 'var(--text-primary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '4px',
+  },
+  helper: {
+    fontSize: '12px', color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px',
+  },
+  memberList: { display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '24px' },
+  memberRow: {
+    display: 'flex', alignItems: 'center', gap: '12px',
+    padding: '12px 12px 12px 10px', borderRadius: '10px', cursor: 'pointer',
+    transition: 'background 0.1s',
+  },
+  avatar: {
+    width: '26px', height: '26px', borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0,
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+  },
+  memberName: {
+    fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+  },
+  selectedLabel: {
+    fontSize: '11px', color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '1px',
+  },
+  newPersonRow: {
+    display: 'flex', alignItems: 'center', gap: '12px',
+    padding: '12px 12px 12px 13px', cursor: 'pointer',
+  },
+  avatarDashed: {
+    width: '26px', height: '26px', borderRadius: '50%',
+    border: '1.5px dashed var(--border-color)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '16px', color: 'var(--text-secondary)', flexShrink: 0,
+  },
+  newInputRow: { display: 'flex', gap: '8px', padding: '8px 0' },
+  newInput: {
+    flex: 1, padding: '10px 12px', fontSize: '14px',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)',
+    border: '0.5px solid var(--border-color)', borderRadius: '8px', outline: 'none',
+  },
+  addBtn: {
+    padding: '10px 16px', fontSize: '14px', fontWeight: 500,
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)',
+    border: 'none', borderRadius: '8px', cursor: 'pointer',
+  },
+  continueBtn: {
+    width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500,
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)',
+    border: 'none', borderRadius: '8px', cursor: 'pointer',
+  },
+};
