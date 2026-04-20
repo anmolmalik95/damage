@@ -67,7 +67,7 @@ export default function ExistingSessions() {
     if (session.status === 'closed') {
       navigate(`/session/${session.id}/breakdown`);
     } else {
-      navigate(`/s/${session.id}`);
+      navigate(`/s/${session.id}`, { state: { from: 'existing-sessions' } });
     }
   }
 

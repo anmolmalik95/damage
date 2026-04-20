@@ -3,10 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getDocs, getDoc, doc, collection } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import { useNavigation } from '../context/NavigationContext';
 
 export default function JoiningScreen() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
+  const { navigateForward, navigateBack } = useNavigation();
 
   const currentMemberId = localStorage.getItem(`member_${sessionId}`);
   const currentMemberName = localStorage.getItem(`memberName_${sessionId}`);
@@ -62,8 +64,13 @@ export default function JoiningScreen() {
     load();
   }, [sessionId, currentMemberId, navigate]);
 
+  function handleBack() {
+    localStorage.removeItem(`member_${sessionId}`);
+    navigateBack(`/s/${sessionId}`);
+  }
+
   function handleGotIt() {
-    navigate(`/session/${sessionId}/claim`);
+    navigateForward(`/session/${sessionId}/claim`);
   }
 
   if (loading) return null;
@@ -72,13 +79,20 @@ export default function JoiningScreen() {
     v.items.map(i => ({ ...i, venueId: v.id, venueName: v.name }))
   );
 
-  // Group claims by venue
+  // Group claims by venue, consolidating whole claims of same itemId
   const venueGroups = {};
   myClaims.forEach(claim => {
     const item = allItems.find(i => i.id === claim.itemId);
     if (!item) return;
-    if (!venueGroups[item.venueId]) venueGroups[item.venueId] = { name: item.venueName, rows: [] };
-    venueGroups[item.venueId].rows.push({ claim, item });
+    if (!venueGroups[item.venueId]) venueGroups[item.venueId] = { name: item.venueName, wholeMap: {}, sharedRows: [] };
+    if (claim.type === 'shared') {
+      venueGroups[item.venueId].sharedRows.push({ claim, item });
+    } else {
+      if (!venueGroups[item.venueId].wholeMap[claim.itemId]) {
+        venueGroups[item.venueId].wholeMap[claim.itemId] = { item, claims: [] };
+      }
+      venueGroups[item.venueId].wholeMap[claim.itemId].claims.push(claim);
+    }
   });
 
   const totalAmount = myClaims.reduce((sum, claim) => {
@@ -92,6 +106,7 @@ export default function JoiningScreen() {
   return (
     <PageContainer>
       <div style={styles.header}>
+        <button style={styles.back} onClick={handleBack}>←</button>
         <div style={styles.title}>Welcome, {currentMemberName}!</div>
         {myClaims.length === 0 ? (
           <div style={styles.subtitle}>Nothing has been claimed for you yet — head to the next screen to start claiming.</div>
@@ -105,19 +120,34 @@ export default function JoiningScreen() {
 
       {myClaims.length > 0 && (
         <div style={styles.claimList}>
-          {Object.values(venueGroups).map(({ name: venueName, rows }) => (
+          {Object.values(venueGroups).map(({ name: venueName, wholeMap, sharedRows }) => (
             <div key={venueName} style={styles.venueGroup}>
               <div style={styles.venueLabel}>{venueName.toUpperCase()}</div>
-              {rows.map(({ claim, item }) => {
-                const amount = claim.type === 'shared'
-                  ? (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1)
-                  : (item.unitPrice ?? 0);
+              {Object.values(wholeMap).map(({ item, claims }) => {
+                const qty = claims.length;
+                const total = (item.unitPrice ?? 0) * qty;
+                const uniqueClaimers = [...new Set(claims.map(c => c.claimedBy))];
+                let meta;
+                if (uniqueClaimers.length === 1) {
+                  const claimedByLabel = uniqueClaimers[0] === currentMemberId ? 'you' : (claims[0].claimedByName ?? members.find(m => m.id === uniqueClaimers[0])?.name ?? '?');
+                  meta = uniqueClaimers[0] === currentMemberId ? 'claimed by you' : `claimed by ${claimedByLabel} for you`;
+                } else {
+                  meta = 'claimed by multiple people';
+                }
+                return (
+                  <div key={item.id} style={styles.claimRow}>
+                    <div style={styles.claimLeft}>
+                      <div style={styles.claimName}>{item.name}{qty > 1 ? ` ×${qty}` : ''}</div>
+                      <div style={styles.claimMeta}>{meta}</div>
+                    </div>
+                    <div style={styles.claimAmt}>${total.toFixed(2)}</div>
+                  </div>
+                );
+              })}
+              {sharedRows.map(({ claim, item }) => {
+                const amount = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
                 const claimedByLabel = claim.claimedBy === currentMemberId ? 'you' : (claim.claimedByName ?? members.find(m => m.id === claim.claimedBy)?.name ?? '?');
-                const meta = claim.type === 'shared'
-                  ? `shared by ${claimedByLabel}`
-                  : (claim.claimedBy === currentMemberId
-                    ? 'claimed by you'
-                    : `claimed by ${claimedByLabel} for you`);
+                const meta = `shared by ${claimedByLabel}`;
                 return (
                   <div key={claim.id} style={styles.claimRow}>
                     <div style={styles.claimLeft}>
@@ -145,7 +175,11 @@ export default function JoiningScreen() {
 }
 
 const styles = {
-  header: { marginBottom: '24px' },
+  header: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' },
+  back: {
+    background: 'none', border: 'none', fontSize: '20px', color: 'var(--text-primary)',
+    cursor: 'pointer', padding: '0', lineHeight: 1, flexShrink: 0,
+  },
   title: {
     fontSize: '20px', fontWeight: 500, color: 'var(--text-primary)',
     fontFamily: 'system-ui, -apple-system, sans-serif',

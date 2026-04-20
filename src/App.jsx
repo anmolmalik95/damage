@@ -1,4 +1,6 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
+import { NavigationProvider } from './context/NavigationContext';
 import OfflineBanner from './components/OfflineBanner';
 import Home from './pages/Home';
 import NewSession from './pages/NewSession';
@@ -19,11 +21,11 @@ import ReconcileSettlement from './pages/ReconcileSettlement';
 import Admin from './pages/Admin';
 import ExistingSessions from './pages/ExistingSessions';
 
-export default function App() {
+function AppRoutes() {
+  const location = useLocation();
   return (
-    <BrowserRouter>
-      <OfflineBanner />
-      <Routes>
+    <AnimatePresence mode="wait" initial={false}>
+      <Routes location={location} key={location.key}>
         <Route path="/" element={<Home />} />
         <Route path="/session/new" element={<NewSession />} />
         <Route path="/session/:sessionId" element={<SessionView />} />
@@ -43,6 +45,17 @@ export default function App() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/existing-sessions" element={<ExistingSessions />} />
       </Routes>
+    </AnimatePresence>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <NavigationProvider>
+        <OfflineBanner />
+        <AppRoutes />
+      </NavigationProvider>
     </BrowserRouter>
   );
 }

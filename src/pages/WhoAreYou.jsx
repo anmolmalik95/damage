@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import SkeletonBlock from '../components/SkeletonBlock';
 import { doc, getDoc, getDocs, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import { useNavigation } from '../context/NavigationContext';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
 export default function WhoAreYou() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { navigateForward, navigateBack } = useNavigation();
+  const from = location.state?.from;
 
   const [session, setSession] = useState(null);
   const [members, setMembers] = useState([]);
@@ -23,7 +27,7 @@ export default function WhoAreYou() {
   useEffect(() => {
     const existingId = localStorage.getItem(`member_${sessionId}`);
     if (existingId) {
-      navigate(`/session/${sessionId}/claim`, { replace: true });
+      navigateForward(`/session/${sessionId}/claim`, { replace: true });
       return;
     }
 
@@ -34,7 +38,7 @@ export default function WhoAreYou() {
       setSession(data);
 
       if (data.status === 'closed') {
-        navigate(`/session/${sessionId}/breakdown`, { replace: true });
+        navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
         return;
       }
 
@@ -79,9 +83,9 @@ export default function WhoAreYou() {
         const data = d.data();
         return data.memberId === member.id || data.sharedWith?.includes(member.id);
       });
-      navigate(`/session/${sessionId}/${hasClaimsForUser ? 'joining' : 'claim'}`);
+      navigateForward(`/session/${sessionId}/${hasClaimsForUser ? 'joining' : 'claim'}`, { state: { from: 'who-are-you' } });
     } catch {
-      navigate(`/session/${sessionId}/claim`);
+      navigateForward(`/session/${sessionId}/claim`);
     }
   }
 
@@ -115,8 +119,11 @@ export default function WhoAreYou() {
   return (
     <PageContainer>
       <div style={styles.header}>
-        <div style={styles.sessionName}>{session?.name}</div>
-        {formattedDate && <div style={styles.sessionDate}>{formattedDate}</div>}
+        <button style={styles.back} onClick={() => navigateBack(from === 'existing-sessions' ? '/existing-sessions' : '/')}>←</button>
+        <div>
+          <div style={styles.sessionName}>{session?.name}</div>
+          {formattedDate && <div style={styles.sessionDate}>{formattedDate}</div>}
+        </div>
       </div>
 
       <div style={styles.prompt}>Who are you?</div>
@@ -185,7 +192,11 @@ export default function WhoAreYou() {
 }
 
 const styles = {
-  header: { marginBottom: '24px' },
+  header: { display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '24px' },
+  back: {
+    background: 'none', border: 'none', fontSize: '20px', color: 'var(--text-primary)',
+    cursor: 'pointer', padding: '0', lineHeight: 1.6, flexShrink: 0,
+  },
   sessionName: {
     fontSize: '22px', fontWeight: 500, color: 'var(--text-primary)',
     fontFamily: 'system-ui, -apple-system, sans-serif',

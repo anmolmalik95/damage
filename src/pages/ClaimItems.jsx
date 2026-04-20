@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigation } from '../context/NavigationContext';
 import { useToast } from '../context/ToastContext';
 import {
   doc, collection, onSnapshot, addDoc, deleteDoc, updateDoc,
@@ -43,6 +44,7 @@ function BottomSheet({ title, subtitle, onClose, children }) {
 export default function ClaimItems() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
+  const { navigateForward, navigateBack } = useNavigation();
 
   const currentMemberId = localStorage.getItem(`member_${sessionId}`);
   const currentMemberName = localStorage.getItem(`memberName_${sessionId}`);
@@ -265,7 +267,7 @@ export default function ClaimItems() {
         });
       }));
 
-      navigate(`/session/${sessionId}/${needsResolve ? 'resolve' : 'breakdown'}`, { state: { from: 'claim' } });
+      navigateForward(`/session/${sessionId}/${needsResolve ? 'resolve' : 'breakdown'}`, { state: { from: 'claim' } });
     } catch (err) {
       console.error(err);
       setFinaliseLoading(false);
@@ -338,7 +340,7 @@ export default function ClaimItems() {
     try {
       await updateDoc(doc(db, 'sessions', sessionId), { status: 'locked' });
       setEndSessionConfirmOpen(false);
-      navigate(`/session/${sessionId}/resolve`);
+      navigateForward(`/session/${sessionId}/resolve`);
     } catch (err) { console.error(err); }
   }
 
@@ -366,7 +368,7 @@ export default function ClaimItems() {
     <PageContainer>
       {/* Header */}
       <div style={s.header}>
-        <button style={s.backBtn} onClick={() => navigate(-1)}>←</button>
+        <button style={s.backBtn} onClick={() => { localStorage.removeItem(`member_${sessionId}`); navigateBack(`/s/${sessionId}`); }}>←</button>
         <span style={s.headerTitle}>{session?.name ?? ''}</span>
         <button style={s.menuBtn} onClick={() => setMenuOpen(true)}>•••</button>
       </div>
@@ -376,6 +378,7 @@ export default function ClaimItems() {
         <div>
           <div style={s.youBarLabel}>Claiming as</div>
           <div style={s.youBarName}>{currentMemberName}</div>
+          <button style={s.notYouBtn} onClick={() => { localStorage.removeItem(`member_${sessionId}`); navigateBack(`/s/${sessionId}`); }}>Not you?</button>
           {claimingForMember && (
             <div style={s.claimingFor}>
               · claiming for {claimingForMember.name}
@@ -411,7 +414,7 @@ export default function ClaimItems() {
 
             return (
               <div key={item.id}>
-                <div style={s.itemRow}>
+                <div style={{ ...s.itemRow, cursor: 'pointer' }} onClick={() => toggleItem(item.id)}>
                   <div style={s.itemLeft}>
                     <div style={s.itemNameRow}>
                       <span style={s.itemName}>{item.name}</span>
@@ -431,14 +434,14 @@ export default function ClaimItems() {
                   <div style={s.itemControls}>
                     <span
                       style={{ ...s.ctrlBtn, opacity: myCnt === 0 ? 0.25 : 1 }}
-                      onClick={() => myCnt > 0 && handleUnclaim(item)}
+                      onClick={e => { e.stopPropagation(); myCnt > 0 && handleUnclaim(item); }}
                     >−</span>
                     <span style={s.ctrlCount}>{myCnt}</span>
                     <span
                       style={{ ...s.ctrlBtn, opacity: allClaimed ? 0.25 : 1 }}
-                      onClick={() => !allClaimed && handleClaim(item)}
+                      onClick={e => { e.stopPropagation(); !allClaimed && handleClaim(item); }}
                     >+</span>
-                    <span style={s.chevron} onClick={() => toggleItem(item.id)}>
+                    <span style={s.chevron}>
                       {isExpanded ? '⌄' : '›'}
                     </span>
                   </div>
@@ -575,7 +578,7 @@ export default function ClaimItems() {
           { icon: '🔗', label: 'Copy link to session', action: handleCopyLink },
           ...(isCreator ? [
             { icon: '✏️', label: 'Rename session', action: () => { setMenuOpen(false); setRenameValue(session?.name ?? ''); setRenameOpen(true); } },
-            { icon: '👥', label: 'Manage people', action: () => { setMenuOpen(false); navigate(`/session/${sessionId}/manage-people`); } },
+            { icon: '👥', label: 'Manage people', action: () => { setMenuOpen(false); navigateForward(`/session/${sessionId}/manage-people`); } },
             { icon: '👤', label: 'Change bill payer', action: () => { setMenuOpen(false); setBillPayerPickerOpen(true); } },
             { icon: '📤', label: 'Export order log', action: handleExport },
             { icon: '✕', label: 'End session', action: () => { setMenuOpen(false); setEndSessionConfirmOpen(true); }, danger: true },
@@ -792,6 +795,11 @@ const s = {
   youBarName: {
     fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)',
     fontFamily: 'system-ui, -apple-system, sans-serif',
+  },
+  notYouBtn: {
+    background: 'none', border: 'none', fontSize: '10px', color: 'var(--text-tertiary)',
+    textDecoration: 'underline', cursor: 'pointer', padding: '1px 0 0',
+    fontFamily: 'system-ui, -apple-system, sans-serif', display: 'block',
   },
   claimingFor: {
     fontSize: '11px', color: '#534AB7',
