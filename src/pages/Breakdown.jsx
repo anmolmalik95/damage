@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import SkeletonBlock from '../components/SkeletonBlock';
@@ -283,7 +284,15 @@ export default function Breakdown() {
                     </div>
                     <div style={s.cardRight}>
                       <span style={s.venueTotal}>${d.total.toFixed(2)}</span>
-                      <span style={s.cardChevron}>{isExpanded ? '⌄' : '›'}</span>
+                      <motion.div
+                        animate={{ rotate: isExpanded ? 90 : 0 }}
+                        transition={{ duration: 0.2, ease: 'easeInOut' }}
+                        style={{ display: 'flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </motion.div>
                       {!isReadOnly && isAdmin && !isClosed && (
                         <button
                           style={paid ? s.paidBtn : s.markPaidBtn}
@@ -299,45 +308,54 @@ export default function Breakdown() {
                   </div>
 
                   {/* Item rows — only when expanded */}
-                  {isExpanded && (
-                    <>
-                      {d.itemRows.map((row, i) => (
-                        <div key={i} style={s.itemRow}>
-                          <div style={s.itemLeft}>
-                            <span style={s.itemName}>
-                              {row.name}{row.count > 1 ? ` ×${row.count}` : ''}
-                            </span>
-                            {row.otherNames?.length > 0 && (
-                              <span style={s.sharedWith}>with {row.otherNames.join(', ')}</span>
+                  <AnimatePresence initial={false}>
+                    {isExpanded && (
+                      <motion.div
+                        key="expanded-content"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+                        style={{ overflow: 'hidden' }}
+                      >
+                        {d.itemRows.map((row, i) => (
+                          <div key={i} style={s.itemRow}>
+                            <div style={s.itemLeft}>
+                              <span style={s.itemName}>
+                                {row.name}{row.count > 1 ? ` ×${row.count}` : ''}
+                              </span>
+                              {row.otherNames?.length > 0 && (
+                                <span style={s.sharedWith}>with {row.otherNames.join(', ')}</span>
+                              )}
+                            </div>
+                            <span style={s.itemAmt}>${row.amount.toFixed(2)}</span>
+                          </div>
+                        ))}
+
+                        {/* GST / service charge sub-rows */}
+                        {(d.gst > 0.005 || d.sc > 0.005) && (
+                          <div style={s.taxRows}>
+                            {d.gst > 0.005 && (
+                              <div style={s.taxRow}>
+                                <span style={s.taxLabel}>
+                                  GST{venue.gstPercent != null ? ` (${venue.gstPercent}%)` : ''}
+                                </span>
+                                <span style={s.taxAmt}>${d.gst.toFixed(2)}</span>
+                              </div>
+                            )}
+                            {d.sc > 0.005 && (
+                              <div style={s.taxRow}>
+                                <span style={s.taxLabel}>
+                                  Service charge{venue.serviceChargePercent != null ? ` (${venue.serviceChargePercent}%)` : ''}
+                                </span>
+                                <span style={s.taxAmt}>${d.sc.toFixed(2)}</span>
+                              </div>
                             )}
                           </div>
-                          <span style={s.itemAmt}>${row.amount.toFixed(2)}</span>
-                        </div>
-                      ))}
-
-                      {/* GST / service charge sub-rows */}
-                      {(d.gst > 0.005 || d.sc > 0.005) && (
-                        <div style={s.taxRows}>
-                          {d.gst > 0.005 && (
-                            <div style={s.taxRow}>
-                              <span style={s.taxLabel}>
-                                GST{venue.gstPercent != null ? ` (${venue.gstPercent}%)` : ''}
-                              </span>
-                              <span style={s.taxAmt}>${d.gst.toFixed(2)}</span>
-                            </div>
-                          )}
-                          {d.sc > 0.005 && (
-                            <div style={s.taxRow}>
-                              <span style={s.taxLabel}>
-                                Service charge{venue.serviceChargePercent != null ? ` (${venue.serviceChargePercent}%)` : ''}
-                              </span>
-                              <span style={s.taxAmt}>${d.sc.toFixed(2)}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  )}
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               );
             })}

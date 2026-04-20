@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useNavigation } from '../context/NavigationContext';
 import { useToast } from '../context/ToastContext';
@@ -510,10 +511,27 @@ export default function ClaimItems() {
                   </div>
                   <div style={s.personRight}>
                     <span style={s.personTotal}>${total.toFixed(2)}</span>
-                    <span style={s.personChevron}>{isExp ? '⌄' : '›'}</span>
+                    <motion.div
+                      animate={{ rotate: isExp ? 90 : 0 }}
+                      transition={{ duration: 0.2, ease: 'easeInOut' }}
+                      style={{ display: 'flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </motion.div>
                   </div>
                 </div>
+                <AnimatePresence initial={false}>
                 {isExp && (
+                  <motion.div
+                    key="person-items"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+                    style={{ overflow: 'hidden' }}
+                  >
                   <div style={s.personItems}>
                     {memberClaims.length === 0
                       ? <div style={s.noItems}>Nothing claimed yet</div>
@@ -553,7 +571,9 @@ export default function ClaimItems() {
                         ];
                       })()}
                   </div>
+                  </motion.div>
                 )}
+                </AnimatePresence>
               </div>
             );
           })}
