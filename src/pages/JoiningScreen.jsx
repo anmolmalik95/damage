@@ -14,6 +14,7 @@ export default function JoiningScreen() {
   const currentMemberName = localStorage.getItem(`memberName_${sessionId}`);
 
   const [sessionName, setSessionName] = useState(null);
+  const [sessionStatus, setSessionStatus] = useState(null);
   const [venues, setVenues] = useState([]);
   const [members, setMembers] = useState([]);
   const [myClaims, setMyClaims] = useState([]);
@@ -36,7 +37,10 @@ export default function JoiningScreen() {
         getDocs(collection(db, 'sessions', sessionId, 'claims')),
         getDocs(collection(db, 'sessions', sessionId, 'venues')),
       ]);
-      if (sessionSnap.exists()) setSessionName(sessionSnap.data().name ?? null);
+      if (sessionSnap.exists()) {
+        setSessionName(sessionSnap.data().name ?? null);
+        setSessionStatus(sessionSnap.data().status ?? null);
+      }
 
       setMembers(membersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
@@ -70,7 +74,11 @@ export default function JoiningScreen() {
   }
 
   function handleGotIt() {
-    navigateForward(`/session/${sessionId}/claim`);
+    if (sessionStatus === 'locked' || sessionStatus === 'closed') {
+      navigateForward(`/session/${sessionId}/breakdown`);
+    } else {
+      navigateForward(`/session/${sessionId}/claim`);
+    }
   }
 
   if (loading) return null;

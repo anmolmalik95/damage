@@ -25,20 +25,26 @@ export default function WhoAreYou() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const existingId = localStorage.getItem(`member_${sessionId}`);
-    if (existingId) {
-      navigateForward(`/session/${sessionId}/claim`, { replace: true });
-      return;
-    }
-
     async function load() {
       const snap = await getDoc(doc(db, 'sessions', sessionId));
       if (!snap.exists()) { setLoading(false); return; }
       const data = snap.data();
       setSession(data);
 
+      // Closed: always go straight to breakdown, no identity needed
       if (data.status === 'closed') {
         navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
+        return;
+      }
+
+      const existingId = localStorage.getItem(`member_${sessionId}`);
+      if (existingId) {
+        // Locked: go to breakdown (read-only), not claim
+        if (data.status === 'locked') {
+          navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
+        } else {
+          navigateForward(`/session/${sessionId}/claim`, { replace: true });
+        }
         return;
       }
 
@@ -48,7 +54,7 @@ export default function WhoAreYou() {
     }
 
     load();
-  }, [sessionId, navigate]);
+  }, [sessionId]);
 
   async function handleAddNew() {
     const name = newName.trim();
@@ -75,6 +81,12 @@ export default function WhoAreYou() {
     if (!member) return;
     localStorage.setItem(`member_${sessionId}`, member.id);
     localStorage.setItem(`memberName_${sessionId}`, member.name);
+
+    // Locked session: go straight to read-only breakdown
+    if (session?.status === 'locked') {
+      navigateForward(`/session/${sessionId}/breakdown`);
+      return;
+    }
 
     setContinuing(true);
     try {

@@ -85,7 +85,14 @@ export default function ClaimItems() {
     if (!currentMemberId) return;
 
     const unsubSession = onSnapshot(doc(db, 'sessions', sessionId), snap => {
-      if (snap.exists()) setSession({ id: snap.id, ...snap.data() });
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.status === 'locked' || data.status === 'closed') {
+          navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
+          return;
+        }
+        setSession({ id: snap.id, ...data });
+      }
     });
     const unsubMembers = onSnapshot(collection(db, 'sessions', sessionId, 'members'), snap => {
       setMembers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
