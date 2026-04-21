@@ -20,7 +20,7 @@ export default function Home() {
           Existing session
         </button>
         <button style={styles.btnSecondary} onClick={() => navigate('/reconcile')}>
-          Reconcile multiple sessions
+          Reconcile sessions
         </button>
       </div>
     </div>

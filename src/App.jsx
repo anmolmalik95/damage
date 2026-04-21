@@ -20,6 +20,7 @@ import MapPeople from './pages/MapPeople';
 import ReconcileSettlement from './pages/ReconcileSettlement';
 import Admin from './pages/Admin';
 import ExistingSessions from './pages/ExistingSessions';
+import MyClaimsScreen from './pages/MyClaimsScreen';
 
 function AppRoutes() {
   const location = useLocation();
@@ -38,6 +39,7 @@ function AppRoutes() {
         <Route path="/session/:sessionId/merge-people" element={<MergePeople />} />
         <Route path="/session/:sessionId/resolve" element={<Resolve />} />
         <Route path="/session/:sessionId/breakdown" element={<Breakdown />} />
+        <Route path="/session/:sessionId/my-claims" element={<MyClaimsScreen />} />
         <Route path="/s/:sessionId" element={<WhoAreYou />} />
         <Route path="/reconcile" element={<Reconcile />} />
         <Route path="/reconcile/map-people" element={<MapPeople />} />

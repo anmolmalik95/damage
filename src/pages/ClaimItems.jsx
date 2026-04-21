@@ -123,9 +123,17 @@ export default function ClaimItems() {
   const targetId = claimingForId || currentMemberId;
   const allItems = venues.flatMap(v => v.items.map(i => ({ ...i, venueId: v.id })));
 
-  const totalUnits = allItems.reduce((s, i) => s + (i.quantity ?? 1), 0);
-  const claimedUnits = new Set(claims.map(c => `${c.itemId}_${c.instanceNumber}`)).size;
-  const progress = totalUnits > 0 ? Math.round((claimedUnits / totalUnits) * 100) : 0;
+  const grandTotal = allItems.reduce((s, i) => s + (i.unitPrice ?? 0) * (i.quantity ?? 1), 0);
+  const claimedInstances = new Set(claims.map(c => `${c.itemId}_${c.instanceNumber}`));
+  let claimedTotal = 0;
+  allItems.forEach(item => {
+    for (let n = 1; n <= (item.quantity ?? 1); n++) {
+      if (claimedInstances.has(`${item.id}_${n}`)) claimedTotal += item.unitPrice ?? 0;
+    }
+  });
+  const fillPct = grandTotal > 0 ? (claimedTotal / grandTotal) * 100 : 0;
+
+  const isDoneClaiming = members.find(m => m.id === currentMemberId)?.doneClaiming === true;
 
   function claimsFor(itemId) { return claims.filter(c => c.itemId === itemId); }
   function instanceClaim(itemId, n) {
@@ -328,6 +336,14 @@ export default function ClaimItems() {
     showToast('Order log downloaded', 'success');
   }
 
+  async function handleDoneClaiming() {
+    const newVal = !isDoneClaiming;
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId, 'members', currentMemberId), { doneClaiming: newVal });
+      if (newVal) navigateForward(`/session/${sessionId}/my-claims`);
+    } catch (err) { console.error(err); }
+  }
+
   async function handleRenameSave() {
     const name = renameValue.trim();
     if (!name) return;
@@ -399,8 +415,15 @@ export default function ClaimItems() {
 
       {/* Progress */}
       <div style={s.progressWrap}>
-        <div style={s.progressTrack}>
-          <div style={{ ...s.progressFill, width: `${progress}%` }} />
+        <div style={s.progressOuter}>
+          <div style={{ ...s.progressFill, width: `${Math.min(fillPct, 100)}%` }}>
+            {fillPct >= 30 && (
+              <span style={s.progressTextInside}>${claimedTotal.toFixed(0)} / ${grandTotal.toFixed(0)} claimed</span>
+            )}
+          </div>
+          {fillPct < 30 && grandTotal > 0 && (
+            <span style={s.progressTextOutside}>${claimedTotal.toFixed(0)} / ${grandTotal.toFixed(0)} claimed</span>
+          )}
         </div>
         <div style={s.progressHint}>
           Tap + to claim · tap › to expand and split individual units
@@ -515,6 +538,9 @@ export default function ClaimItems() {
                     {session?.billPayer === member.id && (
                       <span style={s.billPayerPill}>Bill Payer</span>
                     )}
+                    {member.doneClaiming && (
+                      <span style={s.doneClaimingPill}>Done ✓</span>
+                    )}
                   </div>
                   <div style={s.personRight}>
                     <span style={s.personTotal}>${total.toFixed(2)}</span>
@@ -586,6 +612,22 @@ export default function ClaimItems() {
           })}
           </div>
         </div>
+      )}
+
+      {/* Done claiming — non-creator only */}
+      {!isCreator && currentMemberId && (
+        <button
+          style={{
+            ...s.finaliseBtn,
+            marginTop: '16px',
+            backgroundColor: isDoneClaiming ? 'var(--bg-secondary)' : 'var(--text-primary)',
+            color: isDoneClaiming ? 'var(--text-primary)' : 'var(--bg-primary)',
+            border: isDoneClaiming ? '0.5px solid var(--border-color)' : 'none',
+          }}
+          onClick={handleDoneClaiming}
+        >
+          {isDoneClaiming ? 'Still claiming' : 'Done claiming →'}
+        </button>
       )}
 
       {/* Finalise — creator only */}
@@ -843,13 +885,28 @@ const s = {
     padding: '4px 0', alignSelf: 'center', textDecoration: 'underline',
   },
   progressWrap: { marginBottom: '16px' },
-  progressTrack: {
-    height: '4px', backgroundColor: 'var(--bg-secondary)',
-    borderRadius: '2px', overflow: 'hidden', marginBottom: '6px',
+  progressOuter: {
+    height: '28px', backgroundColor: 'var(--bg-secondary)',
+    borderRadius: '14px', overflow: 'hidden', marginBottom: '6px',
+    position: 'relative', display: 'flex', alignItems: 'center',
   },
   progressFill: {
     height: '100%', backgroundColor: 'var(--text-primary)',
-    borderRadius: '2px', transition: 'width 0.3s ease',
+    borderRadius: '14px', transition: 'width 0.3s ease',
+    display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+    paddingRight: '10px', boxSizing: 'border-box', minWidth: 0,
+    position: 'relative',
+  },
+  progressTextInside: {
+    fontSize: '11px', fontWeight: 600, color: 'var(--bg-primary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    whiteSpace: 'nowrap', overflow: 'hidden',
+  },
+  progressTextOutside: {
+    fontSize: '11px', fontWeight: 500, color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    paddingLeft: '12px', whiteSpace: 'nowrap',
+    position: 'absolute', left: 0,
   },
   progressHint: {
     fontSize: '11px', color: 'var(--text-secondary)',
@@ -958,6 +1015,12 @@ const s = {
     backgroundColor: '#FAEEDA', color: '#633806',
     fontFamily: 'system-ui, -apple-system, sans-serif',
     display: 'inline-block', verticalAlign: 'middle', marginLeft: '6px', flexShrink: 0,
+  },
+  doneClaimingPill: {
+    fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '4px',
+    backgroundColor: '#EAF3DE', color: '#27500A',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    display: 'inline-block', verticalAlign: 'middle', marginLeft: '4px', flexShrink: 0,
   },
   personRight: { display: 'flex', alignItems: 'center', gap: '8px' },
   personTotal: {

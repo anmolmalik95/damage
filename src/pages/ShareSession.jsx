@@ -144,13 +144,33 @@ export default function ShareSession() {
         <div style={styles.linkIcon}>🔗</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={styles.linkUrl}>{sessionUrl()}</div>
-          <div style={styles.linkHint}>Anyone with this link can join and claim</div>
+          <div style={styles.linkHint}>Send this to your group — they can join and claim their items.</div>
         </div>
       </div>
 
       <button style={styles.btnPrimary} onClick={handleCopy}>
         Copy link to clipboard
       </button>
+
+      {/* Bill payer — before the divider */}
+      <div style={styles.billPayerSection}>
+        <div style={styles.billPayerTitle}>Who paid the bill?</div>
+        <div style={styles.billPayerSubtitle}>Select the person who fronted the money.</div>
+        <div style={styles.chipRow}>
+          {allChipMembers.map(m => {
+            const sel = billPayer === m.id;
+            return (
+              <button
+                key={m.id}
+                style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
+                onClick={() => handleSetBillPayer(m.id)}
+              >
+                {m.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Divider */}
       <div style={styles.dividerRow}>
@@ -182,26 +202,6 @@ export default function ShareSession() {
           ))}
         </div>
       )}
-
-      {/* Bill payer — final step before opening */}
-      <div style={styles.billPayerSection}>
-        <div style={styles.billPayerTitle}>Who paid the bill?</div>
-        <div style={styles.billPayerSubtitle}>Select the person who fronted the money.</div>
-        <div style={styles.chipRow}>
-          {allChipMembers.map(m => {
-            const sel = billPayer === m.id;
-            return (
-              <button
-                key={m.id}
-                style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
-                onClick={() => handleSetBillPayer(m.id)}
-              >
-                {m.name}
-              </button>
-            );
-          })}
-        </div>
-      </div>
 
       {error && <p style={styles.error}>{error}</p>}
 
@@ -238,7 +238,7 @@ const styles = {
   memberRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' },
   memberName: { fontSize: '14px', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   removeBtn: { background: 'none', border: 'none', fontSize: '13px', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' },
-  billPayerSection: { marginTop: '20px' },
+  billPayerSection: { marginTop: '20px', marginBottom: '8px' },
   billPayerTitle: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
   billPayerSubtitle: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' },
   chipRow: { display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' },

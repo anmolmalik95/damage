@@ -18,6 +18,10 @@ export function levenshtein(a, b) {
 // Similar = Levenshtein distance <= 3 OR one name contains the other.
 // allMembers: [{ sessionId, memberId, name }]
 // Returns clusters where 2+ sessions are represented.
+function normalizeName(name) {
+  return name.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ');
+}
+
 export function clusterMembers(allMembers) {
   const n = allMembers.length;
   const parent = allMembers.map((_, i) => i);
@@ -31,8 +35,8 @@ export function clusterMembers(allMembers) {
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
       if (allMembers[i].sessionId === allMembers[j].sessionId) continue;
-      const a = allMembers[i].name.toLowerCase();
-      const b = allMembers[j].name.toLowerCase();
+      const a = normalizeName(allMembers[i].name);
+      const b = normalizeName(allMembers[j].name);
       const similar = levenshtein(a, b) <= 3 || a.includes(b) || b.includes(a);
       if (similar) union(i, j);
     }
@@ -105,7 +109,7 @@ export async function fetchSessionData(sessionId) {
 // Returns { memberToCanonical, canonicals }
 // memberToCanonical: `${sessionId}:${memberId}` → canonicalId
 // canonicals: canonicalId → { name }
-export function buildCanonical(sessions, canonicalGroups) {
+export function buildCanonical(sessions, canonicalGroups, canonicalNames = []) {
   const memberToCanonical = {};
   const canonicals = {};
 
@@ -114,7 +118,7 @@ export function buildCanonical(sessions, canonicalGroups) {
     const first = group[0];
     const session = sessions.find(s => s.id === first.sessionId);
     const member = session?.members.find(m => m.id === first.memberId);
-    canonicals[canonicalId] = { name: member?.name ?? '?' };
+    canonicals[canonicalId] = { name: canonicalNames[idx] || member?.name ?? '?' };
     group.forEach(({ sessionId, memberId }) => {
       memberToCanonical[`${sessionId}:${memberId}`] = canonicalId;
     });

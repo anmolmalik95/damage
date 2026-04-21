@@ -33,6 +33,8 @@ export default function Breakdown() {
   const [closeStep, setCloseStep] = useState(0);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [paymentInstructions, setPaymentInstructions] = useState('');
+  const [editingInstructions, setEditingInstructions] = useState(false);
 
   useEffect(() => {
     document.title = session?.name ? `Breakdown · ${session.name} — Unfuck` : 'Unfuck';
@@ -51,7 +53,9 @@ export default function Breakdown() {
     const unsubs = [
       onSnapshot(doc(db, 'sessions', sessionId), snap => {
         if (snap.exists()) {
-          setSession({ id: snap.id, ...snap.data() });
+          const data = snap.data();
+          setSession({ id: snap.id, ...data });
+          setPaymentInstructions(data.paymentInstructions ?? '');
           if (!loadStateRef.current.session) { loadStateRef.current.session = true; checkLoaded(); }
         }
       }),
@@ -151,6 +155,14 @@ export default function Breakdown() {
     setSaving(false);
   }
 
+  async function handleSaveInstructions() {
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions });
+      setEditingInstructions(false);
+      showToast('Payment instructions saved', 'success');
+    } catch (err) { console.error(err); }
+  }
+
   async function handleReopen() {
     setSaving(true);
     try {
@@ -238,18 +250,64 @@ export default function Breakdown() {
           <div style={s.title}>Bill breakdown</div>
           <div style={s.subtitle}>{session.name} · ${totalBill.toFixed(2)}</div>
         </div>
-        {isAdmin && (
-          <button style={s.menuBtn} onClick={() => setMenuOpen(true)}>•••</button>
-        )}
+        <button style={s.menuBtn} onClick={() => setMenuOpen(true)}>•••</button>
       </div>
 
       {/* Status badge + helper */}
       <div style={s.statusRow}>
         <span style={isClosed ? s.closedBadge : s.lockedBadge}>
-          {isClosed ? 'Closed' : 'Locked'}
+          {isClosed ? 'Closed' : '🔒 Locked'}
         </span>
         <span style={s.taxHelper}>Tax split proportionally per venue.</span>
       </div>
+
+      {/* Who pays whom */}
+      {!isReadOnly && session.billPayer && (
+        <div style={s.owesCard}>
+          {currentMemberId === session.billPayer ? (
+            <span style={s.owesText}>You paid the bill. Everyone owes you.</span>
+          ) : (
+            <span style={s.owesText}>
+              You owe <strong>{members.find(m => m.id === session.billPayer)?.name ?? '?'}</strong>
+              {grandTotals[currentMemberId] != null ? ` $${grandTotals[currentMemberId].toFixed(2)}` : ''}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Payment instructions */}
+      {session.paymentInstructions ? (
+        <div style={s.instrCard}>
+          <span style={s.instrIcon}>💬</span>
+          <div style={{ flex: 1 }}>
+            <div style={s.instrText}>{session.paymentInstructions}</div>
+            {isAdmin && (
+              <button style={s.instrEditBtn} onClick={() => setEditingInstructions(true)}>Edit</button>
+            )}
+          </div>
+        </div>
+      ) : isAdmin && (
+        editingInstructions ? (
+          <div style={s.instrEditCard}>
+            <textarea
+              autoFocus
+              style={s.instrTextarea}
+              value={paymentInstructions}
+              onChange={e => setPaymentInstructions(e.target.value)}
+              placeholder="Payment instructions (e.g. PayNow to +65 9xxx xxxx)"
+              rows={2}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <button style={s.instrCancelBtn} onClick={() => { setEditingInstructions(false); setPaymentInstructions(session.paymentInstructions ?? ''); }}>Cancel</button>
+              <button style={s.instrSaveBtn} onClick={handleSaveInstructions}>Save</button>
+            </div>
+          </div>
+        ) : (
+          <button style={s.instrAddBtn} onClick={() => setEditingInstructions(true)}>
+            + Add payment instructions
+          </button>
+        )
+      )}
 
       {/* Per-venue sections */}
       {venueDataMap.map(({ venue, memberData }) => {
@@ -463,21 +521,32 @@ export default function Breakdown() {
         </div>
       )}
       {/* Three-dot menu sheet */}
-      {menuOpen && (
-        <>
-          <div style={s.sheetBackdrop} onClick={() => setMenuOpen(false)} />
-          <div style={s.menuSheet}>
-            <div style={s.sheetHandle} />
-            <div
-              style={s.menuOption}
-              onClick={() => { setMenuOpen(false); setRenameValue(session.name ?? ''); setRenameOpen(true); }}
-            >
-              <span style={s.menuOptionIcon}>✏️</span>
-              <span style={s.menuOptionLabel}>Rename session</span>
+      {menuOpen && (() => {
+        const menuItems = [
+          { icon: '🔗', label: 'Copy session link', action: () => { setMenuOpen(false); handleCopyLink(); } },
+          ...(isAdmin ? [
+            { icon: '✏️', label: 'Rename session', action: () => { setMenuOpen(false); setRenameValue(session.name ?? ''); setRenameOpen(true); } },
+          ] : []),
+        ];
+        return (
+          <>
+            <div style={s.sheetBackdrop} onClick={() => setMenuOpen(false)} />
+            <div style={s.menuSheet}>
+              <div style={s.sheetHandle} />
+              {menuItems.map((item, i) => (
+                <div
+                  key={i}
+                  style={{ ...s.menuOption, borderBottom: i < menuItems.length - 1 ? '0.5px solid var(--border-color)' : 'none' }}
+                  onClick={item.action}
+                >
+                  <span style={s.menuOptionIcon}>{item.icon}</span>
+                  <span style={s.menuOptionLabel}>{item.label}</span>
+                </div>
+              ))}
             </div>
-          </div>
-        </>
-      )}
+          </>
+        );
+      })()}
 
       {/* Rename session sheet */}
       {renameOpen && (
@@ -529,6 +598,17 @@ const s = {
   lockedBadge: { fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '20px', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
   closedBadge: { fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '20px', backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
   taxHelper: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  owesCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', border: '0.5px solid var(--border-color)' },
+  owesText: { fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  instrCard: { display: 'flex', alignItems: 'flex-start', gap: '10px', backgroundColor: '#FAEEDA', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' },
+  instrIcon: { fontSize: '16px', flexShrink: 0, marginTop: '1px' },
+  instrText: { fontSize: '13px', color: '#633806', fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1.4 },
+  instrEditBtn: { background: 'none', border: 'none', fontSize: '11px', color: '#633806', cursor: 'pointer', padding: '4px 0 0', fontFamily: 'system-ui, -apple-system, sans-serif', textDecoration: 'underline', display: 'block' },
+  instrEditCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px', border: '0.5px solid var(--border-color)' },
+  instrTextarea: { width: '100%', padding: '8px 10px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', resize: 'none', boxSizing: 'border-box', colorScheme: 'light dark' },
+  instrCancelBtn: { flex: 1, padding: '8px', fontSize: '13px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer' },
+  instrSaveBtn: { flex: 1, padding: '8px', fontSize: '13px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)', border: 'none', borderRadius: '6px', cursor: 'pointer' },
+  instrAddBtn: { width: '100%', padding: '10px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', color: 'var(--text-secondary)', backgroundColor: 'transparent', border: '0.5px dashed var(--border-color)', borderRadius: '10px', cursor: 'pointer', marginBottom: '16px', textAlign: 'center' },
   venueGroup: { marginBottom: '20px' },
   venueLabel: { fontSize: '11px', fontWeight: 500, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
   memberCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', padding: '12px', marginBottom: '8px', overflow: 'hidden' },

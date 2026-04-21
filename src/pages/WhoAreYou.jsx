@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import SkeletonBlock from '../components/SkeletonBlock';
 import { doc, getDoc, getDocs, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+
 import PageContainer from '../components/PageContainer';
 import { useNavigation } from '../context/NavigationContext';
 
@@ -23,6 +24,8 @@ export default function WhoAreYou() {
   const [adding, setAdding] = useState(false);
   const [continuing, setContinuing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [memberCount, setMemberCount] = useState(0);
+  const [sessionTotal, setSessionTotal] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -50,6 +53,21 @@ export default function WhoAreYou() {
 
       const mSnap = await getDocs(collection(db, 'sessions', sessionId, 'members'));
       setMembers(mSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setMemberCount(mSnap.docs.length);
+
+      let total = 0;
+      try {
+        const vSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
+        for (const vDoc of vSnap.docs) {
+          const vData = vDoc.data();
+          const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'));
+          total += iSnap.docs.reduce((s, d) => {
+            const item = d.data();
+            return s + (item.unitPrice ?? 0) * (item.quantity ?? 1);
+          }, 0) + (vData.gstAmount || 0) + (vData.serviceChargeAmount || 0);
+        }
+      } catch {}
+      setSessionTotal(total);
       setLoading(false);
     }
 
@@ -139,7 +157,14 @@ export default function WhoAreYou() {
       </div>
 
       <div style={styles.prompt}>Who are you?</div>
-      <div style={styles.helper}>Pick yourself from the list below.</div>
+      <div style={styles.helper}>
+        Pick your name to start claiming your items.
+        {memberCount > 0 && (
+          <span style={styles.helperMeta}>
+            {' '}· {memberCount} {memberCount === 1 ? 'person' : 'people'}{sessionTotal > 0 ? ` · $${sessionTotal.toFixed(2)}` : ''}
+          </span>
+        )}
+      </div>
 
       <div style={styles.memberList}>
         {members.map((member, idx) => {
@@ -185,7 +210,7 @@ export default function WhoAreYou() {
             onClick={() => { setShowNewInput(true); setSelectedId(null); }}
           >
             <div style={styles.avatarDashed}>+</div>
-            <div style={{ ...styles.memberName, color: 'var(--text-secondary)' }}>I'm someone new</div>
+            <div style={{ ...styles.memberName, color: 'var(--text-secondary)' }}>+ Add myself</div>
           </div>
         )}
       </div>
@@ -224,6 +249,9 @@ const styles = {
   helper: {
     fontSize: '12px', color: 'var(--text-secondary)',
     fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px',
+  },
+  helperMeta: {
+    color: 'var(--text-tertiary)',
   },
   memberList: { display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '24px' },
   memberRow: {

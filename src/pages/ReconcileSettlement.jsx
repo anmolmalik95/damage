@@ -37,9 +37,9 @@ export default function ReconcileSettlement() {
   useEffect(() => { document.title = 'Reconcile — Unfuck'; }, []);
 
   useEffect(() => {
-    async function loadFromState(stateSessions, stateGroups) {
+    async function loadFromState(stateSessions, stateGroups, stateNames) {
       setSessions(stateSessions);
-      const { memberToCanonical, canonicals } = buildCanonical(stateSessions, stateGroups);
+      const { memberToCanonical, canonicals } = buildCanonical(stateSessions, stateGroups, stateNames ?? []);
       setTransactions(simplifyDebts(stateSessions, memberToCanonical, canonicals));
       setLoading(false);
     }
@@ -55,7 +55,7 @@ export default function ReconcileSettlement() {
 
     const stateData = location.state;
     if (stateData?.sessions?.length) {
-      loadFromState(stateData.sessions, stateData.canonicalGroups ?? []);
+      loadFromState(stateData.sessions, stateData.canonicalGroups ?? [], stateData.canonicalNames);
     } else {
       const ids = searchParams.get('sessions')?.split(',').filter(Boolean) ?? [];
       if (ids.length >= 2) {
@@ -87,8 +87,14 @@ export default function ReconcileSettlement() {
       </div>
 
       <div style={s.helper}>
-        Minimum transactions to settle all debts across all sessions.
+        We've minimised the number of payments needed.
       </div>
+
+      {transactions.length > 0 && (
+        <div style={s.settledSummary}>
+          Settled in {transactions.length} payment{transactions.length !== 1 ? 's' : ''}
+        </div>
+      )}
 
       {transactions.length === 0 ? (
         <div style={s.allSettled}>
@@ -142,7 +148,8 @@ const s = {
   headerText: { flex: 1, minWidth: 0 },
   title: { fontSize: '20px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   subtitle: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  helper: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' },
+  helper: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
+  settledSummary: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' },
   allSettled: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textAlign: 'center', padding: '32px 0', border: '0.5px solid var(--border-color)', borderRadius: '12px', marginBottom: '12px' },
   txCard: { border: '0.5px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden', marginBottom: '12px' },
   txRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', backgroundColor: 'var(--bg-primary)' },

@@ -10,10 +10,16 @@ export default function MapPeople() {
 
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
-  // initialGroups: [{ sessionId, memberId, name }[]] — from fuzzy clustering
   const [initialGroups, setInitialGroups] = useState([]);
-  // selections: { [groupIdx]: { [sessionId]: memberId | 'none' } }
-  const [selections, setSelections] = useState({});
+
+  // Card-by-card state
+  const [currentIdx, setCurrentIdx] = useState(0);
+  // cardSelections: { [groupIdx]: { [sessionId]: memberId } }
+  const [cardSelections, setCardSelections] = useState({});
+  // canonicalNames: { [groupIdx]: string }
+  const [canonicalNames, setCanonicalNames] = useState({});
+  // confirmedGroups: array of group arrays we're keeping
+  const [confirmedGroups, setConfirmedGroups] = useState([]);
 
   useEffect(() => { document.title = 'Reconcile — Unfuck'; }, []);
 
@@ -32,58 +38,70 @@ export default function MapPeople() {
       setInitialGroups(clusters);
 
       const initSel = {};
+      const initNames = {};
       clusters.forEach((group, idx) => {
         initSel[idx] = {};
         group.forEach(m => {
           if (!initSel[idx][m.sessionId]) initSel[idx][m.sessionId] = m.memberId;
         });
+        // Default canonical name = first member's name in the group
+        const first = group[0];
+        const session = sessionData.find(s => s.id === first.sessionId);
+        initNames[idx] = session?.members.find(m => m.id === first.memberId)?.name ?? '';
       });
-      setSelections(initSel);
+      setCardSelections(initSel);
+      setCanonicalNames(initNames);
       setLoading(false);
     }
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function setSelection(groupIdx, sessionId, value) {
-    setSelections(p => ({ ...p, [groupIdx]: { ...(p[groupIdx] ?? {}), [sessionId]: value } }));
+  function handleConfirm() {
+    const group = initialGroups[currentIdx];
+    const sel = cardSelections[currentIdx] ?? {};
+    const seen = new Set();
+    const resolved = group
+      .map(m => ({ sessionId: m.sessionId, memberId: sel[m.sessionId] ?? m.memberId }))
+      .filter(({ sessionId, memberId }) => {
+        if (memberId === 'none' || seen.has(sessionId)) return false;
+        seen.add(sessionId);
+        return true;
+      });
+
+    if (resolved.length >= 2) {
+      setConfirmedGroups(prev => [...prev, { group: resolved, name: canonicalNames[currentIdx] ?? '' }]);
+    }
+    advance();
   }
 
-  function handleConfirm() {
-    const canonicalGroups = initialGroups.map((group, idx) => {
-      const sel = selections[idx] ?? {};
-      const seen = new Set();
-      return group
-        .map(m => ({ sessionId: m.sessionId, memberId: sel[m.sessionId] ?? m.memberId }))
-        .filter(({ sessionId, memberId }) => {
-          if (memberId === 'none' || seen.has(sessionId)) return false;
-          seen.add(sessionId);
-          return true;
-        });
-    }).filter(g => g.length >= 2);
+  function handleSkip() {
+    advance();
+  }
 
-    navigate('/reconcile/settlement', { state: { sessions, canonicalGroups } });
+  function advance() {
+    if (currentIdx >= initialGroups.length - 1) {
+      // Build final canonicalGroups array and names
+      const finalGroups = confirmedGroups.map(cg => cg.group);
+      const finalNames = confirmedGroups.map(cg => cg.name);
+      navigate('/reconcile/settlement', { state: { sessions, canonicalGroups: finalGroups, canonicalNames: finalNames } });
+    } else {
+      setCurrentIdx(prev => prev + 1);
+    }
   }
 
   if (loading) return null;
 
+  // If no groups, go straight to settlement
+  if (initialGroups.length === 0) {
+    navigate('/reconcile/settlement', { state: { sessions, canonicalGroups: [], canonicalNames: [] } });
+    return null;
+  }
+
   const sessionMap = Object.fromEntries(sessions.map(s => [s.id, s]));
-
-  // Compute matched keys dynamically from current selections
-  const matchedKeys = new Set();
-  initialGroups.forEach((group, idx) => {
-    const sel = selections[idx] ?? {};
-    group.forEach(m => {
-      const val = sel[m.sessionId] !== undefined ? sel[m.sessionId] : m.memberId;
-      if (val !== 'none') matchedKeys.add(`${m.sessionId}:${val}`);
-    });
-  });
-
-  // Unmatched = all members not currently matched in any group
-  const unmatched = sessions.flatMap(s =>
-    s.members
-      .filter(m => !matchedKeys.has(`${s.id}:${m.id}`))
-      .map(m => ({ name: m.name, sessionName: s.name }))
-  );
+  const group = initialGroups[currentIdx];
+  const sel = cardSelections[currentIdx] ?? {};
+  const sessionIdsInGroup = [...new Set(group.map(m => m.sessionId))];
+  const progress = currentIdx / initialGroups.length;
 
   return (
     <PageContainer>
@@ -95,68 +113,55 @@ export default function MapPeople() {
         </div>
       </div>
 
-      <div style={s.helper}>
-        Possible matches are flagged below. Use the dropdowns to confirm or set to None if they are different people.
+      {/* Progress bar */}
+      <div style={s.progressOuter}>
+        <div style={{ ...s.progressFill, width: `${Math.min(progress * 100, 100)}%` }} />
+      </div>
+      <div style={s.progressLabel}>{currentIdx + 1} of {initialGroups.length}</div>
+
+      {/* Card */}
+      <div style={s.card}>
+        <div style={s.cardTitle}>Possible match</div>
+        <div style={s.cardSubtitle}>Are these the same person across sessions?</div>
+
+        <div style={s.sessionRows}>
+          {sessionIdsInGroup.map(sid => {
+            const sessionMembers = sessionMap[sid]?.members ?? [];
+            const defaultMemberId = group.find(m => m.sessionId === sid)?.memberId ?? 'none';
+            const curVal = sel[sid] !== undefined ? sel[sid] : defaultMemberId;
+            return (
+              <div key={sid} style={s.sessionRow}>
+                <div style={s.sessionName}>{sessionMap[sid]?.name ?? sid}</div>
+                <select
+                  style={s.dropdown}
+                  value={curVal}
+                  onChange={e => setCardSelections(p => ({ ...p, [currentIdx]: { ...(p[currentIdx] ?? {}), [sid]: e.target.value } }))}
+                >
+                  <option value="none">None — different person</option>
+                  {sessionMembers.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={s.canonicalRow}>
+          <label style={s.canonicalLabel}>Canonical name</label>
+          <input
+            style={s.canonicalInput}
+            type="text"
+            value={canonicalNames[currentIdx] ?? ''}
+            onChange={e => setCanonicalNames(p => ({ ...p, [currentIdx]: e.target.value }))}
+            placeholder="Name to use in settlement"
+          />
+        </div>
       </div>
 
-      {initialGroups.length === 0 && (
-        <div style={s.noMatches}>
-          No automatic matches found — all people will be treated as distinct.
-        </div>
-      )}
-
-      {initialGroups.map((group, idx) => {
-        const sessionIdsInGroup = [...new Set(group.map(m => m.sessionId))];
-        const sel = selections[idx] ?? {};
-
-        return (
-          <div key={idx} style={s.card}>
-            <div style={s.colHeaders}>
-              {sessionIdsInGroup.map(sid => (
-                <div key={sid} style={s.colHeader}>
-                  {sessionMap[sid]?.name ?? sid}
-                </div>
-              ))}
-            </div>
-            <div style={s.dropdownRow}>
-              {sessionIdsInGroup.map(sid => {
-                const sessionMembers = sessionMap[sid]?.members ?? [];
-                const defaultMemberId = group.find(m => m.sessionId === sid)?.memberId ?? 'none';
-                const curVal = sel[sid] !== undefined ? sel[sid] : defaultMemberId;
-                return (
-                  <select
-                    key={sid}
-                    style={s.dropdown}
-                    value={curVal}
-                    onChange={e => setSelection(idx, sid, e.target.value)}
-                  >
-                    <option value="none">None</option>
-                    {sessionMembers.map(m => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </select>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-
-      {unmatched.length > 0 && (
-        <div style={s.unmatchedSection}>
-          <span style={s.unmatchedLabel}>No matches found for: </span>
-          {unmatched.map((m, i) => (
-            <span key={i} style={s.unmatchedName}>
-              {m.name} ({m.sessionName}){i < unmatched.length - 1 ? ', ' : ''}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div style={{ marginTop: '16px', paddingBottom: '16px' }}>
-        <button style={s.confirmBtn} onClick={handleConfirm}>
-          Confirm matches →
-        </button>
+      <div style={s.actions}>
+        <button style={s.skipBtn} onClick={handleSkip}>Skip — different people</button>
+        <button style={s.confirmBtn} onClick={handleConfirm}>Confirm match →</button>
       </div>
     </PageContainer>
   );
@@ -168,15 +173,20 @@ const s = {
   headerText: { flex: 1, minWidth: 0 },
   title: { fontSize: '20px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   subtitle: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '2px' },
-  helper: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px' },
-  noMatches: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' },
-  card: { border: '0.5px solid var(--border-color)', borderRadius: '12px', padding: '14px', marginBottom: '10px', backgroundColor: 'var(--bg-primary)' },
-  colHeaders: { display: 'flex', gap: '8px', marginBottom: '8px' },
-  colHeader: { flex: 1, fontSize: '10px', fontWeight: 500, color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  dropdownRow: { display: 'flex', gap: '8px' },
-  dropdown: { flex: 1, border: '0.5px solid var(--border-color)', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', outline: 'none', cursor: 'pointer', colorScheme: 'light dark', minWidth: 0, width: '100%' },
-  unmatchedSection: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '4px', marginBottom: '4px', lineHeight: 1.6 },
-  unmatchedLabel: { fontWeight: 500 },
-  unmatchedName: {},
+  progressOuter: { height: '4px', backgroundColor: 'var(--bg-secondary)', borderRadius: '2px', overflow: 'hidden', marginBottom: '4px' },
+  progressFill: { height: '100%', backgroundColor: 'var(--text-primary)', borderRadius: '2px', transition: 'width 0.3s ease' },
+  progressLabel: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px' },
+  card: { border: '0.5px solid var(--border-color)', borderRadius: '12px', padding: '16px', backgroundColor: 'var(--bg-primary)', marginBottom: '16px' },
+  cardTitle: { fontSize: '15px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '4px' },
+  cardSubtitle: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '14px' },
+  sessionRows: { display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' },
+  sessionRow: { display: 'flex', flexDirection: 'column', gap: '4px' },
+  sessionName: { fontSize: '10px', fontWeight: 500, color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em' },
+  dropdown: { border: '0.5px solid var(--border-color)', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', outline: 'none', cursor: 'pointer', colorScheme: 'light dark', width: '100%' },
+  canonicalRow: { display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '0.5px solid var(--border-color)', paddingTop: '12px' },
+  canonicalLabel: { fontSize: '10px', fontWeight: 500, color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em' },
+  canonicalInput: { border: '0.5px solid var(--border-color)', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', outline: 'none', width: '100%', boxSizing: 'border-box', colorScheme: 'light dark' },
+  actions: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  skipBtn: { width: '100%', padding: '12px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' },
   confirmBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 600, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', border: 'none', borderRadius: '8px', cursor: 'pointer' },
 };

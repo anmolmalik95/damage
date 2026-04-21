@@ -15,6 +15,7 @@ function fileToBase64(file) {
 }
 
 const venuesDraftKey = id => `draft_upload_${id}`;
+const emptyVenue = () => ({ name: '', photos: [], manualItems: [] });
 
 export default function UploadReceipts() {
   const { sessionId } = useParams();
@@ -24,12 +25,12 @@ export default function UploadReceipts() {
 
   const canRestore = sessionStorage.getItem(`canRestore_upload_${sessionId}`) === 'true';
   const [venues, setVenues] = useState(() => {
-    if (!canRestore) return [{ name: '', photos: [] }];
+    if (!canRestore) return [emptyVenue()];
     try {
       const saved = JSON.parse(sessionStorage.getItem(venuesDraftKey(sessionId)));
-      if (Array.isArray(saved) && saved.length > 0) return saved.map(v => ({ name: v.name, photos: [] }));
+      if (Array.isArray(saved) && saved.length > 0) return saved.map(v => ({ name: v.name, photos: [], manualItems: v.manualItems ?? [] }));
     } catch {}
-    return [{ name: '', photos: [] }];
+    return [emptyVenue()];
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -46,7 +47,7 @@ export default function UploadReceipts() {
   }, [session?.name]);
 
   function saveVenuesDraft(updated) {
-    sessionStorage.setItem(venuesDraftKey(sessionId), JSON.stringify(updated.map(v => ({ name: v.name }))));
+    sessionStorage.setItem(venuesDraftKey(sessionId), JSON.stringify(updated.map(v => ({ name: v.name, manualItems: v.manualItems }))));
   }
 
   function updateVenueName(index, value) {
@@ -59,7 +60,40 @@ export default function UploadReceipts() {
 
   function addVenue() {
     setVenues(prev => {
-      const updated = [...prev, { name: '', photos: [] }];
+      const updated = [...prev, emptyVenue()];
+      saveVenuesDraft(updated);
+      return updated;
+    });
+  }
+
+  function addManualItem(venueIndex) {
+    setVenues(prev => {
+      const updated = prev.map((v, i) => i === venueIndex
+        ? { ...v, manualItems: [...v.manualItems, { name: '', qty: 1, price: '' }] }
+        : v
+      );
+      saveVenuesDraft(updated);
+      return updated;
+    });
+  }
+
+  function updateManualItem(venueIndex, itemIndex, field, value) {
+    setVenues(prev => {
+      const updated = prev.map((v, i) => i === venueIndex
+        ? { ...v, manualItems: v.manualItems.map((item, j) => j === itemIndex ? { ...item, [field]: value } : item) }
+        : v
+      );
+      saveVenuesDraft(updated);
+      return updated;
+    });
+  }
+
+  function removeManualItem(venueIndex, itemIndex) {
+    setVenues(prev => {
+      const updated = prev.map((v, i) => i === venueIndex
+        ? { ...v, manualItems: v.manualItems.filter((_, j) => j !== itemIndex) }
+        : v
+      );
       saveVenuesDraft(updated);
       return updated;
     });
@@ -81,35 +115,58 @@ export default function UploadReceipts() {
   }
 
   async function handleParse() {
-    const valid = venues.some(v => v.name.trim() && v.photos.length > 0);
-    if (!valid) {
-      setError('Add at least one venue name and one photo.');
+    const hasPhoto = venues.some(v => v.name.trim() && v.photos.length > 0);
+    const hasManual = venues.some(v => v.name.trim() && v.manualItems.some(i => i.name.trim()));
+    if (!hasPhoto && !hasManual) {
+      setError('Add at least one venue with a photo or manual items.');
       return;
     }
     setError('');
     setLoading(true);
 
     try {
-      const venuePayloads = await Promise.all(
-        venues
-          .filter(v => v.name.trim() && v.photos.length > 0)
-          .map(async (venue, venueIndex) => {
-            const photos = await Promise.all(venue.photos.map(fileToBase64));
-            return { venueIndex, venueName: venue.name.trim(), photos };
-          })
-      );
+      let parsed = { venues: [] };
 
-      const apiUrl = import.meta.env.DEV
-        ? 'http://localhost:3001/api/parse-receipt'
-        : '/api/parse-receipt';
-      const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, venues: venuePayloads }),
-      });
+      if (hasPhoto) {
+        const venuePayloads = await Promise.all(
+          venues
+            .filter(v => v.name.trim() && v.photos.length > 0)
+            .map(async venue => {
+              const photos = await Promise.all(venue.photos.map(fileToBase64));
+              return { venueName: venue.name.trim(), photos };
+            })
+        );
 
-      if (!res.ok) throw new Error('Parsing failed');
-      const parsed = await res.json();
+        const apiUrl = import.meta.env.DEV
+          ? 'http://localhost:3001/api/parse-receipt'
+          : '/api/parse-receipt';
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, venues: venuePayloads }),
+        });
+
+        if (!res.ok) throw new Error('Parsing failed');
+        parsed = await res.json();
+      }
+
+      // Merge manual items into parsed results
+      for (const venue of venues) {
+        if (!venue.name.trim()) continue;
+        const validManual = venue.manualItems.filter(i => i.name.trim());
+        if (!validManual.length) continue;
+        const existing = parsed.venues?.find(v => v.name === venue.name.trim());
+        const manualRows = validManual.map(i => ({
+          name: i.name.trim(),
+          quantity: Math.max(1, parseInt(i.qty) || 1),
+          unitPrice: parseFloat(i.price) || 0,
+        }));
+        if (existing) {
+          existing.items = [...(existing.items ?? []), ...manualRows];
+        } else {
+          parsed.venues = [...(parsed.venues ?? []), { name: venue.name.trim(), items: manualRows }];
+        }
+      }
 
       sessionStorage.setItem(`canRestore_upload_${sessionId}`, 'true');
       sessionStorage.setItem(`canRestore_confirm_${sessionId}`, 'true');
@@ -136,7 +193,7 @@ export default function UploadReceipts() {
           <span className="spinner" />
           Reading your receipt...
         </>
-      ) : 'Parse receipts →'}
+      ) : 'Continue →'}
     </button>
   );
 
@@ -160,6 +217,9 @@ export default function UploadReceipts() {
             onNameChange={val => updateVenueName(vi, val)}
             onAddPhoto={file => addPhoto(vi, file)}
             onRemovePhoto={pi => removePhoto(vi, pi)}
+            onAddManual={() => addManualItem(vi)}
+            onUpdateManual={(ii, field, val) => updateManualItem(vi, ii, field, val)}
+            onRemoveManual={ii => removeManualItem(vi, ii)}
           />
         ))}
       </div>
@@ -180,7 +240,7 @@ export default function UploadReceipts() {
   );
 }
 
-function VenueBlock({ venue, onNameChange, onAddPhoto, onRemovePhoto }) {
+function VenueBlock({ venue, onNameChange, onAddPhoto, onRemovePhoto, onAddManual, onUpdateManual, onRemoveManual }) {
   const inputRef = useRef(null);
 
   return (
@@ -216,18 +276,57 @@ function VenueBlock({ venue, onNameChange, onAddPhoto, onRemovePhoto }) {
           ref={inputRef}
           type="file"
           accept="image/*"
-          capture="environment"
+          multiple
           style={{ display: 'none' }}
           onChange={e => {
-            const file = e.target.files?.[0];
-            if (file) onAddPhoto(file);
+            const files = Array.from(e.target.files ?? []);
+            files.forEach(f => onAddPhoto(f));
             e.target.value = '';
           }}
         />
       </div>
-      <p style={styles.manualLink}>
-        Add item to {venue.name || 'this venue'} manually
-      </p>
+
+      {venue.manualItems.length > 0 && (
+        <div style={styles.manualItemsList}>
+          <div style={styles.manualItemsHeader}>
+            <span style={styles.manualColName}>Item</span>
+            <span style={styles.manualColQty}>Qty</span>
+            <span style={styles.manualColPrice}>Price</span>
+            <span style={{ width: '24px' }} />
+          </div>
+          {venue.manualItems.map((item, i) => (
+            <div key={i} style={styles.manualItemRow}>
+              <input
+                style={{ ...styles.manualInput, flex: 1 }}
+                type="text"
+                value={item.name}
+                onChange={e => onUpdateManual(i, 'name', e.target.value)}
+                placeholder="Item name"
+              />
+              <input
+                style={{ ...styles.manualInput, width: '44px' }}
+                type="number"
+                value={item.qty}
+                min="1"
+                onChange={e => onUpdateManual(i, 'qty', e.target.value)}
+              />
+              <input
+                style={{ ...styles.manualInput, width: '70px' }}
+                type="number"
+                value={item.price}
+                step="0.01"
+                min="0"
+                onChange={e => onUpdateManual(i, 'price', e.target.value)}
+                placeholder="0.00"
+              />
+              <button style={styles.manualRemoveBtn} onClick={() => onRemoveManual(i)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button style={styles.manualAddBtn} onClick={onAddManual}>
+        + Add item manually
+      </button>
     </div>
   );
 }
@@ -342,13 +441,90 @@ const styles = {
     justifyContent: 'center',
     userSelect: 'none',
   },
-  manualLink: {
-    fontSize: '13px',
+  manualAddBtn: {
+    fontSize: '12px',
     color: 'var(--text-secondary)',
     fontFamily: 'system-ui, -apple-system, sans-serif',
-    textAlign: 'center',
+    backgroundColor: 'transparent',
+    border: '0.5px dashed var(--border-color)',
+    borderRadius: '6px',
+    padding: '7px 12px',
     cursor: 'pointer',
     marginTop: '8px',
+    width: '100%',
+    textAlign: 'center',
+  },
+  manualItemsList: {
+    marginTop: '8px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  manualItemsHeader: {
+    display: 'flex',
+    gap: '6px',
+    alignItems: 'center',
+    padding: '0 2px',
+  },
+  manualColName: {
+    flex: 1,
+    fontSize: '10px',
+    color: 'var(--text-tertiary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontWeight: 500,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+  },
+  manualColQty: {
+    width: '44px',
+    fontSize: '10px',
+    color: 'var(--text-tertiary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontWeight: 500,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+    flexShrink: 0,
+  },
+  manualColPrice: {
+    width: '70px',
+    fontSize: '10px',
+    color: 'var(--text-tertiary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontWeight: 500,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+    flexShrink: 0,
+  },
+  manualItemRow: {
+    display: 'flex',
+    gap: '6px',
+    alignItems: 'center',
+  },
+  manualInput: {
+    padding: '7px 8px',
+    fontSize: '13px',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+    border: '0.5px solid var(--border-color)',
+    borderRadius: '6px',
+    outline: 'none',
+    colorScheme: 'light dark',
+  },
+  manualRemoveBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-secondary)',
+    border: '0.5px solid var(--border-color)',
+    cursor: 'pointer',
+    fontSize: '13px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    padding: 0,
   },
   venueFooter: {
     display: 'flex',

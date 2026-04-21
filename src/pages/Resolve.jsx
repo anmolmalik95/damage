@@ -194,18 +194,27 @@ export default function Resolve() {
 
   const totalCount = unresolved.length + overclaimed.length;
 
+  function handleAutoResolve() {
+    const newRes = { ...resolutions };
+    unresolved.forEach(u => {
+      if (!newRes[u.itemId]) {
+        newRes[u.itemId] = { type: 'split', memberId: undefined, selectedIds: new Set() };
+      }
+    });
+    setResolutions(newRes);
+  }
+
   return (
     <PageContainer>
       <div style={s.header}>
         <button style={s.back} onClick={() => navigate(`/session/${sessionId}/claim`)}>←</button>
-        <div>
-          <div style={s.title}>Resolve session</div>
-          <div style={s.subtitle}>{totalCount} item{totalCount !== 1 ? 's' : ''} need attention</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={s.title}>Almost done</div>
+          <div style={s.subtitle}>{totalCount} item{totalCount !== 1 ? 's' : ''} need assigning</div>
         </div>
-      </div>
-
-      <div style={s.helper}>
-        Assign each unclaimed item or fix overclaimed ones before generating the breakdown.
+        {unresolved.length > 0 && (
+          <button style={s.autoResolveBtn} onClick={handleAutoResolve}>Auto-resolve all</button>
+        )}
       </div>
 
       <div style={s.card}>
@@ -239,7 +248,7 @@ export default function Resolve() {
                   Split among all
                 </div>
                 <div style={{ ...s.chip, ...(r?.type === 'choose' ? s.chipSel : {}) }} onClick={() => setRes(u.itemId, 'choose')}>
-                  Choose who
+                  Custom split
                 </div>
               </div>
 
@@ -326,7 +335,8 @@ export default function Resolve() {
 }
 
 const s = {
-  header: { display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '16px' },
+  header: { display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '16px', flexWrap: 'nowrap' },
+  autoResolveBtn: { fontSize: '12px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', color: 'var(--text-primary)', backgroundColor: 'var(--bg-secondary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', padding: '6px 10px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0, alignSelf: 'center' },
   back: { background: 'none', border: 'none', fontSize: '20px', color: 'var(--text-primary)', cursor: 'pointer', padding: '0', lineHeight: 1.6 },
   title: { fontSize: '20px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   subtitle: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '2px' },
@@ -335,7 +345,7 @@ const s = {
   itemBlock: { padding: '12px 14px', backgroundColor: 'var(--bg-primary)' },
   itemTopRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '4px' },
   itemLeft: { display: 'flex', alignItems: 'center', gap: '8px', flex: 1, flexWrap: 'wrap' },
-  itemName: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  itemName: { fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   itemPrice: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
   unclaimedTag: { fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', backgroundColor: '#FCEBEB', color: '#A32D2D', fontFamily: 'system-ui, -apple-system, sans-serif' },
   overTag: { fontSize: '10px', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', backgroundColor: '#FEF3DC', color: '#7A4800', fontFamily: 'system-ui, -apple-system, sans-serif' },
