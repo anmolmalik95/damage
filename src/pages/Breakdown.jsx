@@ -213,7 +213,9 @@ export default function Breakdown() {
   );
 
   const currentMember = members.find(m => m.id === currentMemberId);
-  const isAdmin = !isReadOnly && (currentMember?.isCreator || session.billPayer === currentMemberId);
+  const isBillPayer = !isReadOnly && !!session.billPayer && session.billPayer === currentMemberId;
+  const isAdmin = !isReadOnly && (currentMember?.isCreator === true || isBillPayer);
+  console.log('paymentInstructions:', session?.paymentInstructions, 'isBillPayer:', isBillPayer, 'isAdmin:', isAdmin);
   const isClosed = session.status === 'closed';
   const totalBill = venues.reduce((sum, v) => {
     const itemsTotal = v.items.reduce((s, i) => s + (i.unitPrice ?? 0) * (i.quantity ?? 1), 0);
@@ -281,12 +283,12 @@ export default function Breakdown() {
           <span style={s.instrIcon}>💬</span>
           <div style={{ flex: 1 }}>
             <div style={s.instrText}>{session.paymentInstructions}</div>
-            {isAdmin && (
+            {(isAdmin || isBillPayer) && (
               <button style={s.instrEditBtn} onClick={() => setEditingInstructions(true)}>Edit</button>
             )}
           </div>
         </div>
-      ) : isAdmin && (
+      ) : (isAdmin || isBillPayer) && (
         editingInstructions ? (
           <div style={s.instrEditCard}>
             <textarea
