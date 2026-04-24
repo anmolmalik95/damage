@@ -345,8 +345,6 @@ export default function Breakdown() {
         const avatarIdx = memberIndex[member.id] ?? 0;
         const avatarCol = AVATAR_COLORS[avatarIdx % AVATAR_COLORS.length];
         const isExpanded = expandedCards.has(member.id);
-        const memberDoneClaiming = member.doneClaiming === true;
-
         const memberVenueData = sortedVenueDataMap
           .map(({ venue, memberData }) => ({ venue, data: memberData[member.id] }))
           .filter(({ data }) => !!data);
@@ -367,9 +365,7 @@ export default function Breakdown() {
                 {session.billPayer === member.id && (
                   <span style={s.billPayerPill}>Bill Payer</span>
                 )}
-                {memberDoneClaiming && (
-                  <span style={s.doneClaimingPill}>Done claiming</span>
-                )}
+
               </div>
               <div style={s.cardRight}>
                 <span style={s.venueTotal}>${grandTotal.toFixed(2)}</span>
