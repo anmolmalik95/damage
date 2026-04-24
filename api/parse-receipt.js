@@ -1,5 +1,13 @@
 import OpenAI from 'openai';
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '20mb',
+    },
+  },
+};
+
 const SYSTEM_PROMPT = `You are a precise receipt parser. Your job is to extract data EXACTLY as printed on the receipt — do not calculate or estimate any values.
 
 Rules:

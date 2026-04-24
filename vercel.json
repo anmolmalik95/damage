@@ -7,8 +7,7 @@
   ],
   "functions": {
     "api/parse-receipt.js": {
-      "maxDuration": 60,
-      "bodySizeLimit": "20mb"
+      "maxDuration": 60
     }
   }
 }
