@@ -633,12 +633,24 @@ export default function ClaimItems() {
       {/* Finalise — creator only */}
       {isCreator && (
         <button
-          style={{ ...s.finaliseBtn, opacity: finaliseLoading ? 0.6 : 1, marginTop: '16px' }}
+          style={{ ...s.finaliseBtn, opacity: (finaliseLoading || session?.editingItems) ? 0.6 : 1, marginTop: '16px' }}
           onClick={handleFinalise}
-          disabled={finaliseLoading}
+          disabled={finaliseLoading || !!session?.editingItems}
         >
           {finaliseLoading ? 'Finalising…' : 'Finalise & lock session'}
         </button>
+      )}
+
+      {/* Editing overlay — shown to everyone except the person editing */}
+      {session?.editingItems && session?.editingBy !== currentMemberId && (
+        <div style={s.editingOverlay}>
+          <div style={s.editingOverlayCard}>
+            <div style={s.editingOverlayTitle}>{session.name}</div>
+            <div style={s.editingOverlayBody}>
+              Items are being updated by {session.editingByName ?? 'someone'}. The session will resume shortly.
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Three-dot menu sheet */}
@@ -650,6 +662,13 @@ export default function ClaimItems() {
             { icon: '👥', label: 'Manage people', action: () => { setMenuOpen(false); navigateForward(`/session/${sessionId}/manage-people`); } },
             { icon: '👤', label: 'Change bill payer', action: () => { setMenuOpen(false); setBillPayerPickerOpen(true); } },
             { icon: '📤', label: 'Export order log', action: handleExport },
+            { icon: '🖊️', label: 'Edit items', action: async () => {
+              setMenuOpen(false);
+              try {
+                await updateDoc(doc(db, 'sessions', sessionId), { editingItems: true, editingBy: currentMemberId, editingByName: currentMemberName });
+                navigateForward(`/session/${sessionId}/edit-items`);
+              } catch (err) { console.error(err); }
+            }},
             { icon: '✕', label: 'End session', action: () => { setMenuOpen(false); setEndSessionConfirmOpen(true); }, danger: true },
           ] : []),
         ];
@@ -1186,5 +1205,22 @@ const s = {
     fontFamily: 'system-ui, -apple-system, sans-serif',
     backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)',
     border: 'none', borderRadius: '8px', cursor: 'pointer',
+  },
+  editingOverlay: {
+    position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)',
+    zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: '24px',
+  },
+  editingOverlayCard: {
+    backgroundColor: 'var(--bg-primary)', borderRadius: '16px',
+    padding: '24px', maxWidth: '320px', width: '100%', textAlign: 'center',
+  },
+  editingOverlayTitle: {
+    fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '10px',
+  },
+  editingOverlayBody: {
+    fontSize: '14px', color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1.5,
   },
 };

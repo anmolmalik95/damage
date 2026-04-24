@@ -118,7 +118,7 @@ export function buildCanonical(sessions, canonicalGroups, canonicalNames = []) {
     const first = group[0];
     const session = sessions.find(s => s.id === first.sessionId);
     const member = session?.members.find(m => m.id === first.memberId);
-    canonicals[canonicalId] = { name: canonicalNames[idx] || member?.name ?? '?' };
+    canonicals[canonicalId] = { name: (canonicalNames[idx] || member?.name) ?? '?' };
     group.forEach(({ sessionId, memberId }) => {
       memberToCanonical[`${sessionId}:${memberId}`] = canonicalId;
     });

@@ -21,6 +21,8 @@ import ReconcileSettlement from './pages/ReconcileSettlement';
 import Admin from './pages/Admin';
 import ExistingSessions from './pages/ExistingSessions';
 import MyClaimsScreen from './pages/MyClaimsScreen';
+import ReceiptsScreen from './pages/ReceiptsScreen';
+import EditItems from './pages/EditItems';
 
 function AppRoutes() {
   const location = useLocation();
@@ -40,6 +42,8 @@ function AppRoutes() {
         <Route path="/session/:sessionId/resolve" element={<Resolve />} />
         <Route path="/session/:sessionId/breakdown" element={<Breakdown />} />
         <Route path="/session/:sessionId/my-claims" element={<MyClaimsScreen />} />
+        <Route path="/session/:sessionId/receipts" element={<ReceiptsScreen />} />
+        <Route path="/session/:sessionId/edit-items" element={<EditItems />} />
         <Route path="/s/:sessionId" element={<WhoAreYou />} />
         <Route path="/reconcile" element={<Reconcile />} />
         <Route path="/reconcile/map-people" element={<MapPeople />} />

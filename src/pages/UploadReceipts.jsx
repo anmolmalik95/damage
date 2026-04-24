@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 
@@ -32,6 +33,7 @@ export default function UploadReceipts() {
     } catch {}
     return [emptyVenue()];
   });
+  const [cabs, setCabs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -106,6 +108,27 @@ export default function UploadReceipts() {
     ));
   }
 
+  function addCab() {
+    setCabs(prev => [...prev, { id: `cab_${Date.now()}`, from: '', to: '', price: '' }]);
+  }
+
+  function updateCab(id, field, value) {
+    setCabs(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  }
+
+  function removeCab(id) {
+    setCabs(prev => prev.filter(c => c.id !== id));
+  }
+
+  function cabName(cab) {
+    const from = cab.from.trim();
+    const to = cab.to.trim();
+    if (from && to) return `Cab from ${from} to ${to}`;
+    if (from) return `Cab from ${from}`;
+    if (to) return `Cab to ${to}`;
+    return 'Cab';
+  }
+
   function removePhoto(venueIndex, photoIndex) {
     setVenues(prev => prev.map((v, i) =>
       i === venueIndex
@@ -117,8 +140,9 @@ export default function UploadReceipts() {
   async function handleParse() {
     const hasPhoto = venues.some(v => v.name.trim() && v.photos.length > 0);
     const hasManual = venues.some(v => v.name.trim() && v.manualItems.some(i => i.name.trim()));
-    if (!hasPhoto && !hasManual) {
-      setError('Add at least one venue with a photo or manual items.');
+    const hasValidCabs = cabs.some(c => parseFloat(c.price) > 0);
+    if (!hasPhoto && !hasManual && !hasValidCabs) {
+      setError('Add at least one venue with a photo, manual items, or a cab.');
       return;
     }
     setError('');
@@ -126,36 +150,57 @@ export default function UploadReceipts() {
 
     try {
       let parsed = { venues: [] };
+      const venuesWithPhotos = venues.filter(v => v.name.trim() && v.photos.length > 0);
 
-      if (hasPhoto) {
-        const venuePayloads = await Promise.all(
-          venues
-            .filter(v => v.name.trim() && v.photos.length > 0)
-            .map(async venue => {
+      const [apiResult, photoUrlsByVenue] = await Promise.all([
+        // API parse (only if there are photos)
+        hasPhoto ? (async () => {
+          const venuePayloads = await Promise.all(
+            venuesWithPhotos.map(async venue => {
               const photos = await Promise.all(venue.photos.map(fileToBase64));
               return { venueName: venue.name.trim(), photos };
             })
-        );
+          );
+          const apiUrl = import.meta.env.DEV
+            ? 'http://localhost:3001/api/parse-receipt'
+            : '/api/parse-receipt';
+          const res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId, venues: venuePayloads }),
+          });
+          if (!res.ok) throw new Error('Parsing failed');
+          return res.json();
+        })() : Promise.resolve({ venues: [] }),
 
-        const apiUrl = import.meta.env.DEV
-          ? 'http://localhost:3001/api/parse-receipt'
-          : '/api/parse-receipt';
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, venues: venuePayloads }),
-        });
+        // Storage upload (concurrent with API)
+        (async () => {
+          const result = {};
+          await Promise.all(
+            venuesWithPhotos.map(async venue => {
+              const urls = await Promise.all(
+                venue.photos.map(async (file, pi) => {
+                  const path = `receipts/${sessionId}/${venue.name.trim()}/${pi}_${Date.now()}.jpg`;
+                  const fileRef = storageRef(storage, path);
+                  await uploadBytes(fileRef, file);
+                  return getDownloadURL(fileRef);
+                })
+              );
+              result[venue.name.trim()] = urls;
+            })
+          );
+          return result;
+        })(),
+      ]);
 
-        if (!res.ok) throw new Error('Parsing failed');
-        parsed = await res.json();
-      }
+      parsed = apiResult;
 
-      // Merge manual items into parsed results
+      // Merge manual items
       for (const venue of venues) {
         if (!venue.name.trim()) continue;
         const validManual = venue.manualItems.filter(i => i.name.trim());
         if (!validManual.length) continue;
-        const existing = parsed.venues?.find(v => v.name === venue.name.trim());
+        const existing = parsed.venues?.find(v => (v.venueName || v.name) === venue.name.trim());
         const manualRows = validManual.map(i => ({
           name: i.name.trim(),
           quantity: Math.max(1, parseInt(i.qty) || 1),
@@ -164,13 +209,31 @@ export default function UploadReceipts() {
         if (existing) {
           existing.items = [...(existing.items ?? []), ...manualRows];
         } else {
-          parsed.venues = [...(parsed.venues ?? []), { name: venue.name.trim(), items: manualRows }];
+          parsed.venues = [...(parsed.venues ?? []), { name: venue.name.trim(), venueName: venue.name.trim(), items: manualRows }];
+        }
+      }
+
+      // Add cabs as Transport venue
+      if (hasValidCabs) {
+        const validCabs = cabs.filter(c => parseFloat(c.price) > 0);
+        const cabItems = validCabs.map(c => ({
+          name: cabName(c),
+          quantity: 1,
+          unitPrice: parseFloat(c.price) || 0,
+        }));
+        const existing = parsed.venues?.find(v => (v.venueName || v.name) === 'Transport');
+        if (existing) {
+          existing.items = [...(existing.items ?? []), ...cabItems];
+        } else {
+          parsed.venues = [...(parsed.venues ?? []), { name: 'Transport', venueName: 'Transport', items: cabItems }];
         }
       }
 
       sessionStorage.setItem(`canRestore_upload_${sessionId}`, 'true');
       sessionStorage.setItem(`canRestore_confirm_${sessionId}`, 'true');
-      navigate(`/session/${sessionId}/confirm`, { state: { parsed, venueNames: venues.map(v => v.name.trim()) } });
+      navigate(`/session/${sessionId}/confirm`, {
+        state: { parsed, venueNames: venues.map(v => v.name.trim()), photoUrlsByVenue },
+      });
     } catch (err) {
       setError('Something went wrong. Please try again.');
       console.error(err);
@@ -228,6 +291,42 @@ export default function UploadReceipts() {
         <span style={styles.venueCount}>{venues.length} {venues.length === 1 ? 'venue' : 'venues'}</span>
         <button style={styles.addVenueBtn} onClick={addVenue}>+ Add venue</button>
       </div>
+
+      {/* Cabs */}
+      {cabs.length > 0 && (
+        <div style={styles.cabsBlock}>
+          <div style={styles.cabsHeader}>Cabs / Transport</div>
+          {cabs.map(cab => (
+            <div key={cab.id} style={styles.cabRow}>
+              <input
+                style={{ ...styles.cabInput, flex: 1 }}
+                type="text"
+                value={cab.from}
+                onChange={e => updateCab(cab.id, 'from', e.target.value)}
+                placeholder="From"
+              />
+              <input
+                style={{ ...styles.cabInput, flex: 1 }}
+                type="text"
+                value={cab.to}
+                onChange={e => updateCab(cab.id, 'to', e.target.value)}
+                placeholder="To"
+              />
+              <input
+                style={{ ...styles.cabInput, width: '72px' }}
+                type="number"
+                value={cab.price}
+                step="0.01"
+                min="0"
+                onChange={e => updateCab(cab.id, 'price', e.target.value)}
+                placeholder="$0.00"
+              />
+              <button style={styles.cabRemoveBtn} onClick={() => removeCab(cab.id)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button style={styles.addCabBtn} onClick={addCab}>+ Add cab</button>
 
       {error && <p style={styles.error}>{error}</p>}
 
@@ -569,6 +668,67 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     gap: '8px',
+  },
+  cabsBlock: {
+    backgroundColor: 'var(--bg-secondary)',
+    borderRadius: '12px',
+    padding: '12px 14px',
+    marginBottom: '8px',
+  },
+  cabsHeader: {
+    fontSize: '12px',
+    fontWeight: 500,
+    color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    marginBottom: '10px',
+  },
+  cabRow: {
+    display: 'flex',
+    gap: '6px',
+    alignItems: 'center',
+    marginBottom: '6px',
+  },
+  cabInput: {
+    padding: '7px 8px',
+    fontSize: '13px',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+    border: '0.5px solid var(--border-color)',
+    borderRadius: '6px',
+    outline: 'none',
+    colorScheme: 'light dark',
+    minWidth: 0,
+  },
+  cabRemoveBtn: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-secondary)',
+    border: '0.5px solid var(--border-color)',
+    cursor: 'pointer',
+    fontSize: '13px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    padding: 0,
+  },
+  addCabBtn: {
+    fontSize: '12px',
+    color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    backgroundColor: 'transparent',
+    border: '0.5px dashed var(--border-color)',
+    borderRadius: '6px',
+    padding: '7px 12px',
+    cursor: 'pointer',
+    marginBottom: '8px',
+    width: '100%',
+    textAlign: 'center',
   },
   fixedBar: {
     position: 'fixed',

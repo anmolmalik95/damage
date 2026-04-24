@@ -8,7 +8,7 @@ const draftKey = id => `draft_confirm_${id}`;
 
 function parsedToVenues(parsed) {
   return parsed.venues.map(v => ({
-    name: v.venueName,
+    name: v.venueName || v.name,
     gst: v.gst?.present ? v.gst : null,
     serviceCharge: v.serviceCharge?.present ? v.serviceCharge : null,
     receiptTotal: v.receiptTotal ?? 0,
@@ -28,6 +28,7 @@ export default function ConfirmItems() {
   const location = useLocation();
 
   const [session, setSession] = useState(null);
+  const photoUrlsByVenue = location.state?.photoUrlsByVenue ?? {};
   const canRestore = sessionStorage.getItem(`canRestore_confirm_${sessionId}`) === 'true';
   const [venues, setVenues] = useState(() => {
     if (!canRestore) return [];
@@ -228,6 +229,7 @@ export default function ConfirmItems() {
             serviceChargePercent: venue.serviceCharge?.percent ?? null,
             serviceChargeAmount: venueScAmount(venue),
             receiptTotal: parseFloat(venue.userReceiptTotal) || venueTaxedTotal(venue),
+            photoUrls: photoUrlsByVenue[venue.name] ?? [],
             createdAt: serverTimestamp(),
           });
 
@@ -311,29 +313,31 @@ export default function ConfirmItems() {
               </div>
             </div>
 
-            <div style={styles.compCard}>
-              <div style={styles.compRow}>
-                <span style={styles.compLabel}>Parsed total</span>
-                <span style={styles.compValue}>${vParsed.toFixed(2)}</span>
+            {venue.name !== 'Transport' && (
+              <div style={styles.compCard}>
+                <div style={styles.compRow}>
+                  <span style={styles.compLabel}>Parsed total</span>
+                  <span style={styles.compValue}>${vParsed.toFixed(2)}</span>
+                </div>
+                <div style={styles.compRow}>
+                  <span style={styles.compLabel}>Receipt total</span>
+                  <input
+                    style={styles.receiptInput}
+                    type="number"
+                    step="0.01"
+                    value={venue.userReceiptTotal}
+                    onChange={e => updateVenueReceiptTotal(vi, e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+                <div style={styles.compRow}>
+                  <span style={styles.compLabel}>Difference</span>
+                  <span style={{ ...styles.compDiff, color: vDiffOk ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                    {vDiffOk ? '✓' : '✗'} ${vDiff.toFixed(2)}
+                  </span>
+                </div>
               </div>
-              <div style={styles.compRow}>
-                <span style={styles.compLabel}>Receipt total</span>
-                <input
-                  style={styles.receiptInput}
-                  type="number"
-                  step="0.01"
-                  value={venue.userReceiptTotal}
-                  onChange={e => updateVenueReceiptTotal(vi, e.target.value)}
-                  placeholder="0.00"
-                />
-              </div>
-              <div style={styles.compRow}>
-                <span style={styles.compLabel}>Difference</span>
-                <span style={{ ...styles.compDiff, color: vDiffOk ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                  {vDiffOk ? '✓' : '✗'} ${vDiff.toFixed(2)}
-                </span>
-              </div>
-            </div>
+            )}
           </Fragment>
         );
       })}

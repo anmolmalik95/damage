@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { doc, getDoc, getDocs, updateDoc, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -29,6 +29,9 @@ export default function ShareSession() {
   });
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState('');
+  const [paymentInstructions, setPaymentInstructions] = useState('');
+  const nameInputRef = useRef(null);
+  const instrDebounceRef = useRef(null);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export default function ShareSession() {
       const data = snap.data();
       setSession(data);
       if (data.billPayer) setBillPayer(data.billPayer);
+      if (data.paymentInstructions != null) setPaymentInstructions(data.paymentInstructions);
 
       if (!location.state?.total) {
         const vSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
@@ -90,6 +94,17 @@ export default function ShareSession() {
       return updated;
     });
     setNewName('');
+    setTimeout(() => nameInputRef.current?.focus(), 50);
+  }
+
+  function handleInstructionsChange(val) {
+    if (val.length > 200) return;
+    setPaymentInstructions(val);
+    clearTimeout(instrDebounceRef.current);
+    instrDebounceRef.current = setTimeout(async () => {
+      try { await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions: val }); }
+      catch (err) { console.error(err); }
+    }, 1000);
   }
 
   async function handleRemoveMember(memberId) {
@@ -172,6 +187,21 @@ export default function ShareSession() {
         </div>
       </div>
 
+      {/* Payment instructions */}
+      <div style={styles.instrSection}>
+        <div style={styles.instrLabel}>Payment instructions</div>
+        <div style={styles.instrSub}>e.g. "PayNow to +65 9xxx xxxx — save to contacts as John"</div>
+        <textarea
+          style={styles.instrTextarea}
+          value={paymentInstructions}
+          onChange={e => handleInstructionsChange(e.target.value)}
+          placeholder="Leave blank to skip..."
+          rows={3}
+          maxLength={200}
+        />
+        <div style={styles.instrCounter}>{paymentInstructions.length}/200</div>
+      </div>
+
       {/* Divider */}
       <div style={styles.dividerRow}>
         <div style={styles.dividerLine} />
@@ -182,12 +212,13 @@ export default function ShareSession() {
       {/* Manual add */}
       <div style={styles.addRow}>
         <input
+          ref={nameInputRef}
           style={styles.nameInput}
           type="text"
           value={newName}
           onChange={e => setNewName(e.target.value)}
           placeholder="Add name..."
-          onKeyDown={e => e.key === 'Enter' && handleAddMember()}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddMember(); } }}
         />
         <button style={styles.addBtn} onClick={handleAddMember}>Add</button>
       </div>
@@ -246,4 +277,9 @@ const styles = {
   chipSel: { backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', border: '0.5px solid var(--text-primary)' },
   openButtonWrap: { marginTop: '16px' },
   error: { fontSize: '12px', color: 'var(--color-danger)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '8px' },
+  instrSection: { marginTop: '20px', marginBottom: '8px' },
+  instrLabel: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '4px' },
+  instrSub: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
+  instrTextarea: { width: '100%', padding: '10px 12px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', outline: 'none', resize: 'none', boxSizing: 'border-box', colorScheme: 'light dark' },
+  instrCounter: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', textAlign: 'right', marginTop: '4px' },
 };

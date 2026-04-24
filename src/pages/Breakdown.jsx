@@ -35,6 +35,8 @@ export default function Breakdown() {
   const [saving, setSaving] = useState(false);
   const [paymentInstructions, setPaymentInstructions] = useState('');
   const [editingInstructions, setEditingInstructions] = useState(false);
+  const [instrSheetOpen, setInstrSheetOpen] = useState(false);
+  const [instrSheetDraft, setInstrSheetDraft] = useState('');
 
   useEffect(() => {
     document.title = session?.name ? `Breakdown · ${session.name} — Unfuck` : 'Unfuck';
@@ -163,6 +165,15 @@ export default function Breakdown() {
     } catch (err) { console.error(err); }
   }
 
+  async function handleSaveInstrSheet() {
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions: instrSheetDraft });
+      setPaymentInstructions(instrSheetDraft);
+      setInstrSheetOpen(false);
+      showToast('Payment instructions saved', 'success');
+    } catch (err) { console.error(err); }
+  }
+
   async function handleReopen() {
     setSaving(true);
     try {
@@ -261,6 +272,9 @@ export default function Breakdown() {
           {isClosed ? 'Closed' : '🔒 Locked'}
         </span>
         <span style={s.taxHelper}>Tax split proportionally per venue.</span>
+        <button style={s.receiptsBtn} onClick={() => navigate(`/session/${sessionId}/receipts`)}>
+          Receipts 🧾
+        </button>
       </div>
 
       {/* Who pays whom */}
@@ -529,6 +543,9 @@ export default function Breakdown() {
           ...(isAdmin ? [
             { icon: '✏️', label: 'Rename session', action: () => { setMenuOpen(false); setRenameValue(session.name ?? ''); setRenameOpen(true); } },
           ] : []),
+          ...((isAdmin || isBillPayer) ? [
+            { icon: '💬', label: 'Edit payment instructions', action: () => { setMenuOpen(false); setInstrSheetDraft(paymentInstructions); setInstrSheetOpen(true); } },
+          ] : []),
         ];
         return (
           <>
@@ -549,6 +566,31 @@ export default function Breakdown() {
           </>
         );
       })()}
+
+      {/* Edit payment instructions sheet */}
+      {instrSheetOpen && (
+        <>
+          <div style={s.sheetBackdrop} onClick={() => setInstrSheetOpen(false)} />
+          <div style={s.menuSheet}>
+            <div style={s.sheetHandle} />
+            <div style={s.renameTitle}>Payment instructions</div>
+            <textarea
+              autoFocus
+              style={{ ...s.instrTextarea, marginBottom: '6px' }}
+              value={instrSheetDraft}
+              maxLength={200}
+              onChange={e => setInstrSheetDraft(e.target.value)}
+              placeholder="e.g. PayNow to +65 9xxx xxxx"
+              rows={3}
+            />
+            <div style={s.renameCounter}>{instrSheetDraft.length}/200</div>
+            <div style={s.renameBtns}>
+              <button style={s.cancelBtn} onClick={() => setInstrSheetOpen(false)}>Cancel</button>
+              <button style={s.saveBtn} onClick={handleSaveInstrSheet}>Save</button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Rename session sheet */}
       {renameOpen && (
@@ -600,6 +642,8 @@ const s = {
   lockedBadge: { fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '20px', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
   closedBadge: { fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '20px', backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
   taxHelper: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  receiptsBtn: { background: 'none', border: 'none', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'system-ui, -apple-system, sans-serif', padding: '0', marginLeft: 'auto', flexShrink: 0 },
+  instrTextarea: { width: '100%', padding: '8px 10px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', resize: 'none', boxSizing: 'border-box', colorScheme: 'light dark' },
   owesCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', border: '0.5px solid var(--border-color)' },
   owesText: { fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   instrCard: { display: 'flex', alignItems: 'flex-start', gap: '10px', backgroundColor: '#FAEEDA', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' },
