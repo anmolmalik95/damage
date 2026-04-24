@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, query, where, updateDoc } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import PageContainer from '../components/PageContainer';
@@ -175,28 +175,7 @@ export default function UploadReceipts() {
         }))
       );
 
-      // Storage upload (required — fail fast if it doesn't work)
-      const storagePromise = cappedVenues.length > 0
-        ? (async () => {
-            const result = {};
-            await Promise.all(
-              cappedVenues.map(async venue => {
-                const urls = await Promise.all(
-                  venue.cappedPhotos.map(async (file, pi) => {
-                    const path = `receipts/${sessionId}/${venue.name.trim()}/${pi}_${Date.now()}.jpg`;
-                    const fileRef = storageRef(storage, path);
-                    await uploadBytes(fileRef, file);
-                    return getDownloadURL(fileRef);
-                  })
-                );
-                result[venue.name.trim()] = urls;
-              })
-            );
-            return result;
-          })().catch(err => { throw Object.assign(err, { _source: 'storage' }); })
-        : Promise.resolve({});
-
-      // API parse (concurrent with Storage upload)
+      // API parse
       const apiPromise = hasPhoto
         ? (async () => {
             const venuePayloads = await Promise.all(
@@ -232,15 +211,11 @@ export default function UploadReceipts() {
           })().catch(err => { throw Object.assign(err, { _source: 'api' }); })
         : Promise.resolve({ venues: [] });
 
-      let apiResult, photoUrlsByVenue;
+      let apiResult;
       try {
-        [apiResult, photoUrlsByVenue] = await Promise.all([apiPromise, storagePromise]);
+        apiResult = await apiPromise;
       } catch (err) {
-        if (err._source === 'storage') {
-          setError('Failed to save receipt photos. Please try again.');
-        } else {
-          setError('Something went wrong. Please try again.');
-        }
+        setError(err.message || 'Something went wrong. Please try again.');
         console.error(err);
         setLoading(false);
         return;
@@ -285,8 +260,35 @@ export default function UploadReceipts() {
       sessionStorage.setItem(`canRestore_upload_${sessionId}`, 'true');
       sessionStorage.setItem(`canRestore_confirm_${sessionId}`, 'true');
       navigate(`/session/${sessionId}/confirm`, {
-        state: { parsed, venueNames: venues.map(v => v.name.trim()), photoUrlsByVenue },
+        state: { parsed, venueNames: venues.map(v => v.name.trim()) },
       });
+
+      // Background storage upload — non-blocking, does not affect user flow
+      if (cappedVenues.length > 0) {
+        (async () => {
+          try {
+            await Promise.all(
+              cappedVenues.map(async venue => {
+                const urls = await Promise.all(
+                  venue.cappedPhotos.map(async (file, pi) => {
+                    const path = `receipts/${sessionId}/${venue.name.trim()}/${pi}_${Date.now()}.jpg`;
+                    const fileRef = storageRef(storage, path);
+                    await uploadBytes(fileRef, file);
+                    return getDownloadURL(fileRef);
+                  })
+                );
+                // Save URLs to Firestore venue doc if it exists
+                const venuesSnap = await getDocs(
+                  query(collection(db, 'sessions', sessionId, 'venues'), where('name', '==', venue.name.trim()))
+                );
+                venuesSnap.forEach(d => updateDoc(d.ref, { photoUrls: urls }));
+              })
+            );
+          } catch (err) {
+            console.error('Background storage upload failed:', err);
+          }
+        })();
+      }
     } catch (err) {
       setError('Something went wrong. Please try again.');
       console.error(err);
