@@ -15,7 +15,7 @@ function fileToBase64(file) {
   });
 }
 
-function capImageSize(file, maxWidth = 1600) {
+function capImageSize(file, maxWidth = 1200) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
@@ -25,7 +25,7 @@ function capImageSize(file, maxWidth = 1600) {
       canvas.width = maxWidth;
       canvas.height = img.height * ratio;
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(blob => resolve(new File([blob], file.name, { type: 'image/jpeg' })), 'image/jpeg', 0.92);
+      canvas.toBlob(blob => resolve(new File([blob], file.name, { type: 'image/jpeg' })), 'image/jpeg', 0.85);
     };
     img.src = URL.createObjectURL(file);
   });
@@ -208,12 +208,26 @@ export default function UploadReceipts() {
             const apiUrl = import.meta.env.DEV
               ? 'http://localhost:3001/api/parse-receipt'
               : '/api/parse-receipt';
-            const res = await fetch(apiUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sessionId, venues: venuePayloads }),
-            });
-            if (!res.ok) throw new Error('Parsing failed');
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 55000);
+            let res;
+            try {
+              res = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId, venues: venuePayloads }),
+                signal: controller.signal,
+              });
+            } catch (err) {
+              clearTimeout(timeoutId);
+              if (err.name === 'AbortError') throw new Error('Request timed out — please try again with fewer or smaller photos');
+              throw err;
+            }
+            clearTimeout(timeoutId);
+            if (!res.ok) {
+              const errorData = await res.json().catch(() => ({}));
+              throw new Error(errorData.error || `Server error: ${res.status}`);
+            }
             return res.json();
           })().catch(err => { throw Object.assign(err, { _source: 'api' }); })
         : Promise.resolve({ venues: [] });
