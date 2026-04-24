@@ -252,6 +252,13 @@ export default function Breakdown() {
   }
 
   const memberIndex = Object.fromEntries(members.map((m, i) => [m.id, i]));
+  const sortedVenueDataMap = [...venueDataMap].sort((a, b) => {
+    const aT = a.venue.isTransport || a.venue.name === 'Transport';
+    const bT = b.venue.isTransport || b.venue.name === 'Transport';
+    if (aT) return 1;
+    if (bT) return -1;
+    return 0;
+  });
 
   return (
     <PageContainer>
@@ -329,74 +336,81 @@ export default function Breakdown() {
         </div>
       ) : null}
 
-      {/* Per-venue sections */}
-      {venueDataMap.map(({ venue, memberData }) => {
-        const membersWithItems = members.filter(m => memberData[m.id]);
-        if (!membersWithItems.length) return null;
+      {/* Person cards — one per member, all venues combined */}
+      {members.map(member => {
+        if (!grandTotals[member.id]) return null;
+        const grandTotal = grandTotals[member.id];
+        const paid = paidStatus[member.id]?.paid ?? false;
+        const isMe = member.id === currentMemberId;
+        const avatarIdx = memberIndex[member.id] ?? 0;
+        const avatarCol = AVATAR_COLORS[avatarIdx % AVATAR_COLORS.length];
+        const isExpanded = expandedCards.has(member.id);
+        const memberDoneClaiming = member.doneClaiming === true;
+
+        const memberVenueData = sortedVenueDataMap
+          .map(({ venue, memberData }) => ({ venue, data: memberData[member.id] }))
+          .filter(({ data }) => !!data);
 
         return (
-          <div key={venue.id} style={s.venueGroup}>
-            <div style={s.venueLabel}>{venue.name.toUpperCase()}</div>
+          <div
+            key={member.id}
+            style={{ ...s.memberCard, ...(paid ? { border: '0.5px solid #27500A' } : {}) }}
+          >
+            <div style={{ ...s.cardHeader, cursor: 'pointer' }} onClick={() => toggleCard(member.id)}>
+              <div style={s.cardLeft}>
+                <div style={{ ...s.avatar, backgroundColor: avatarCol }}>
+                  {member.name.charAt(0).toUpperCase()}
+                </div>
+                <span style={s.memberName}>
+                  {member.name}{isMe ? ' (you)' : ''}
+                </span>
+                {session.billPayer === member.id && (
+                  <span style={s.billPayerPill}>Bill Payer</span>
+                )}
+                {memberDoneClaiming && (
+                  <span style={s.doneClaimingPill}>Done claiming</span>
+                )}
+              </div>
+              <div style={s.cardRight}>
+                <span style={s.venueTotal}>${grandTotal.toFixed(2)}</span>
+                <motion.div
+                  animate={{ rotate: isExpanded ? 90 : 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  style={{ display: 'flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </motion.div>
+                {!isReadOnly && isAdmin && !isClosed && (
+                  <button
+                    style={paid ? s.paidBtn : s.markPaidBtn}
+                    onClick={e => { e.stopPropagation(); togglePaid(member.id); }}
+                  >
+                    {paid ? 'Paid ✓' : 'Mark paid'}
+                  </button>
+                )}
+                {(isReadOnly || !isAdmin) && paid && (
+                  <span style={s.paidTag}>Paid ✓</span>
+                )}
+              </div>
+            </div>
 
-            {membersWithItems.map(member => {
-              const d = memberData[member.id];
-              const paid = paidStatus[member.id]?.paid ?? false;
-              const isMe = member.id === currentMemberId;
-              const avatarColor = AVATAR_COLORS[memberIndex[member.id] % AVATAR_COLORS.length];
-
-              const isExpanded = expandedCards.has(member.id);
-              return (
-                <div key={member.id} style={s.memberCard}>
-                  {/* Card header — clickable to expand/collapse */}
-                  <div style={{ ...s.cardHeader, cursor: 'pointer' }} onClick={() => toggleCard(member.id)}>
-                    <div style={s.cardLeft}>
-                      <div style={{ ...s.avatar, backgroundColor: avatarColor }}>
-                        {member.name.charAt(0).toUpperCase()}
-                      </div>
-                      <span style={s.memberName}>
-                        {member.name}{isMe ? ' (you)' : ''}
-                      </span>
-                      {session.billPayer === member.id && (
-                        <span style={s.billPayerPill}>Bill Payer</span>
-                      )}
-                    </div>
-                    <div style={s.cardRight}>
-                      <span style={s.venueTotal}>${d.total.toFixed(2)}</span>
-                      <motion.div
-                        animate={{ rotate: isExpanded ? 90 : 0 }}
-                        transition={{ duration: 0.2, ease: 'easeInOut' }}
-                        style={{ display: 'flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}
-                      >
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      </motion.div>
-                      {!isReadOnly && isAdmin && !isClosed && (
-                        <button
-                          style={paid ? s.paidBtn : s.markPaidBtn}
-                          onClick={e => { e.stopPropagation(); togglePaid(member.id); }}
-                        >
-                          {paid ? 'Paid ✓' : 'Mark paid'}
-                        </button>
-                      )}
-                      {(isReadOnly || !isAdmin) && paid && (
-                        <span style={s.paidTag}>Paid ✓</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Item rows — only when expanded */}
-                  <AnimatePresence initial={false}>
-                    {isExpanded && (
-                      <motion.div
-                        key="expanded-content"
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
-                        style={{ overflow: 'hidden' }}
-                      >
-                        {d.itemRows.map((row, i) => (
+            <AnimatePresence initial={false}>
+              {isExpanded && (
+                <motion.div
+                  key="expanded-content"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+                  style={{ overflow: 'hidden' }}
+                >
+                  <div style={s.expandedContent}>
+                    {memberVenueData.map(({ venue, data }, vi) => (
+                      <div key={venue.id} style={vi > 0 ? { marginTop: '12px' } : {}}>
+                        <div style={s.venueSubLabel}>{venue.name.toUpperCase()}</div>
+                        {data.itemRows.map((row, i) => (
                           <div key={i} style={s.itemRow}>
                             <div style={s.itemLeft}>
                               <span style={s.itemName}>
@@ -409,34 +423,36 @@ export default function Breakdown() {
                             <span style={s.itemAmt}>${row.amount.toFixed(2)}</span>
                           </div>
                         ))}
-
-                        {/* GST / service charge sub-rows */}
-                        {(d.gst > 0.005 || d.sc > 0.005) && (
+                        {(data.gst > 0.005 || data.sc > 0.005) && (
                           <div style={s.taxRows}>
-                            {d.gst > 0.005 && (
+                            {data.gst > 0.005 && (
                               <div style={s.taxRow}>
                                 <span style={s.taxLabel}>
                                   GST{venue.gstPercent != null ? ` (${venue.gstPercent}%)` : ''}
                                 </span>
-                                <span style={s.taxAmt}>${d.gst.toFixed(2)}</span>
+                                <span style={s.taxAmt}>${data.gst.toFixed(2)}</span>
                               </div>
                             )}
-                            {d.sc > 0.005 && (
+                            {data.sc > 0.005 && (
                               <div style={s.taxRow}>
                                 <span style={s.taxLabel}>
                                   Service charge{venue.serviceChargePercent != null ? ` (${venue.serviceChargePercent}%)` : ''}
                                 </span>
-                                <span style={s.taxAmt}>${d.sc.toFixed(2)}</span>
+                                <span style={s.taxAmt}>${data.sc.toFixed(2)}</span>
                               </div>
                             )}
                           </div>
                         )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
+                        <div style={s.venueSubtotalRow}>
+                          <span style={s.venueSubtotalLabel}>Venue subtotal</span>
+                          <span style={s.venueSubtotalAmt}>${data.total.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         );
       })}
@@ -664,7 +680,13 @@ const s = {
   venueGroup: { marginBottom: '20px' },
   venueLabel: { fontSize: '11px', fontWeight: 500, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
   memberCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', padding: '12px', marginBottom: '8px', overflow: 'hidden' },
-  cardHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' },
+  cardHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  doneClaimingPill: { fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '4px', backgroundColor: '#EAF3DE', color: '#27500A', fontFamily: 'system-ui, -apple-system, sans-serif', display: 'inline-block', verticalAlign: 'middle', marginLeft: '4px', flexShrink: 0, whiteSpace: 'nowrap' },
+  expandedContent: { borderTop: '0.5px solid var(--border-color)', marginTop: '8px', paddingTop: '4px' },
+  venueSubLabel: { fontSize: '10px', fontWeight: 500, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: 'system-ui, -apple-system, sans-serif', padding: '8px 0 4px' },
+  venueSubtotalRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '0.5px solid var(--border-color)', paddingTop: '6px', marginTop: '4px' },
+  venueSubtotalLabel: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 500 },
+  venueSubtotalAmt: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 500 },
   cardLeft: { display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflow: 'hidden' },
   cardRight: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
   cardChevron: { fontSize: '16px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1, flexShrink: 0 },

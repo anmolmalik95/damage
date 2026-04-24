@@ -441,9 +441,25 @@ export default function ClaimItems() {
       </div>
 
       {/* Venue blocks */}
-      {venues.map(venue => (
+      {[...venues].sort((a, b) => {
+        if (a.name === 'Transport' || a.isTransport) return 1;
+        if (b.name === 'Transport' || b.isTransport) return -1;
+        return 0;
+      }).map(venue => {
+        const isVenueFullyClaimed = venue.items.length > 0 && venue.items.every(
+          item => claimsFor(item.id).length >= (item.quantity ?? 1)
+        );
+        return (
         <div key={venue.id} style={s.venueBlock}>
-          <div style={s.venueHeader}>{venue.name}</div>
+          <div style={s.venueHeader}>
+            <span style={isVenueFullyClaimed ? { color: '#27500A' } : {}}>{venue.name}</span>
+            {isVenueFullyClaimed && (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="7" fill="#EAF3DE"/>
+                <path d="M5 8L7 10L11 6" stroke="#27500A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
+          </div>
           {venue.items.map(item => {
             const itemClaims = claimsFor(item.id);
             const totalClaimed = itemClaims.length;
@@ -525,7 +541,8 @@ export default function ClaimItems() {
             );
           })}
         </div>
-      ))}
+        );
+      })}
 
       {/* Running totals */}
       {members.length > 0 && (
@@ -549,7 +566,7 @@ export default function ClaimItems() {
                       <span style={s.billPayerPill}>Bill Payer</span>
                     )}
                     {member.doneClaiming && (
-                      <span style={s.doneClaimingPill}>Done ✓</span>
+                      <span style={s.doneClaimingPill}>Done claiming</span>
                     )}
                   </div>
                   <div style={s.personRight}>
@@ -838,6 +855,22 @@ export default function ClaimItems() {
               </div>
             )}
 
+            <button
+              style={{
+                width: '100%', backgroundColor: 'transparent',
+                border: '1px solid var(--border-color)', borderRadius: '8px',
+                padding: '10px', fontSize: '13px', fontWeight: 500,
+                color: 'var(--text-primary)', cursor: 'pointer',
+                fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '12px',
+              }}
+              onClick={() => {
+                const allSelected = members.every(m => sharedSelected.includes(m.id));
+                setSharedSelected(allSelected ? [] : members.map(m => m.id));
+              }}
+            >
+              {members.every(m => sharedSelected.includes(m.id)) ? 'Deselect all' : 'Split between all'}
+            </button>
+
             {sharedSelected.length > 0 && (
               <div style={s.splitSummary}>
                 <span style={s.splitSummaryText}>Split evenly between {sharedSelected.length} {sharedSelected.length === 1 ? 'person' : 'people'} · </span>
@@ -949,6 +982,7 @@ const s = {
     backgroundColor: 'var(--bg-secondary)', padding: '8px 12px',
     fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)',
     fontFamily: 'system-ui, -apple-system, sans-serif',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   },
   itemRow: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',

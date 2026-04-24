@@ -266,7 +266,14 @@ export default function ConfirmItems() {
         </div>
       </div>
 
-      {venues.map((venue, vi) => {
+      {venues
+        .map((venue, vi) => ({ venue, vi }))
+        .sort(({ venue: a }, { venue: b }) => {
+          if (a.name === 'Transport' || a.isTransport) return 1;
+          if (b.name === 'Transport' || b.isTransport) return -1;
+          return 0;
+        })
+        .map(({ venue, vi }) => {
         const vParsed = venueTaxedTotal(venue);
         const vReceipt = parseFloat(venue.userReceiptTotal) || 0;
         const vDiff = Math.abs(vParsed - vReceipt);

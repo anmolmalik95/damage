@@ -195,7 +195,7 @@ export default function ShareSession() {
           style={styles.instrTextarea}
           value={paymentInstructions}
           onChange={e => handleInstructionsChange(e.target.value)}
-          placeholder="Leave blank to skip..."
+          placeholder="PayNow to 9XXX XXXX"
           rows={3}
           maxLength={200}
         />
