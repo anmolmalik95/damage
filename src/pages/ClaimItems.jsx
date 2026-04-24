@@ -132,6 +132,7 @@ export default function ClaimItems() {
     }
   });
   const fillPct = grandTotal > 0 ? (claimedTotal / grandTotal) * 100 : 0;
+  const allItemsClaimed = grandTotal > 0 && claimedTotal >= grandTotal;
 
   const isDoneClaiming = members.find(m => m.id === currentMemberId)?.doneClaiming === true;
 
@@ -413,12 +414,21 @@ export default function ClaimItems() {
         <button style={s.switchBtn} onClick={() => setSwitchSheetOpen(true)}>switch</button>
       </div>
 
+      {/* Frozen banner */}
+      {isDoneClaiming && (
+        <div style={s.frozenBanner}>
+          You've marked yourself as done. Tap "Resume claiming" to make changes.
+        </div>
+      )}
+
       {/* Progress */}
       <div style={s.progressWrap}>
         <div style={s.progressOuter}>
-          <div style={{ ...s.progressFill, width: `${Math.min(fillPct, 100)}%` }}>
+          <div style={{ ...s.progressFill, width: `${Math.min(fillPct, 100)}%`, backgroundColor: allItemsClaimed ? '#27500A' : 'var(--text-primary)' }}>
             {fillPct >= 30 && (
-              <span style={s.progressTextInside}>${claimedTotal.toFixed(0)} / ${grandTotal.toFixed(0)} claimed</span>
+              <span style={{ ...s.progressTextInside, color: allItemsClaimed ? '#fff' : 'var(--bg-primary)' }}>
+                {allItemsClaimed ? 'All items claimed ✓' : `$${claimedTotal.toFixed(0)} / $${grandTotal.toFixed(0)} claimed`}
+              </span>
             )}
           </div>
           {fillPct < 30 && grandTotal > 0 && (
@@ -464,13 +474,13 @@ export default function ClaimItems() {
                   </div>
                   <div style={s.itemControls}>
                     <span
-                      style={{ ...s.ctrlBtn, opacity: myCnt === 0 ? 0.25 : 1 }}
-                      onClick={e => { e.stopPropagation(); myCnt > 0 && handleUnclaim(item); }}
+                      style={{ ...s.ctrlBtn, opacity: (myCnt === 0 || isDoneClaiming) ? 0.25 : 1 }}
+                      onClick={e => { e.stopPropagation(); !isDoneClaiming && myCnt > 0 && handleUnclaim(item); }}
                     >−</span>
                     <span style={s.ctrlCount}>{myCnt}</span>
                     <span
-                      style={{ ...s.ctrlBtn, opacity: allClaimed ? 0.25 : 1 }}
-                      onClick={e => { e.stopPropagation(); !allClaimed && handleClaim(item); }}
+                      style={{ ...s.ctrlBtn, opacity: (allClaimed || isDoneClaiming) ? 0.25 : 1 }}
+                      onClick={e => { e.stopPropagation(); !isDoneClaiming && !allClaimed && handleClaim(item); }}
                     >+</span>
                     <span style={s.chevron}>
                       {isExpanded ? '⌄' : '›'}
@@ -626,7 +636,7 @@ export default function ClaimItems() {
           }}
           onClick={handleDoneClaiming}
         >
-          {isDoneClaiming ? 'Still claiming' : 'Done claiming →'}
+          {isDoneClaiming ? 'Resume claiming' : 'Done claiming'}
         </button>
       )}
 
@@ -1205,6 +1215,16 @@ const s = {
     fontFamily: 'system-ui, -apple-system, sans-serif',
     backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)',
     border: 'none', borderRadius: '8px', cursor: 'pointer',
+  },
+  frozenBanner: {
+    backgroundColor: '#FAEEDA',
+    color: '#633806',
+    fontSize: '12px',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    padding: '10px 14px',
+    borderRadius: '8px',
+    marginBottom: '12px',
+    lineHeight: 1.4,
   },
   editingOverlay: {
     position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)',

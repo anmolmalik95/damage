@@ -15,6 +15,22 @@ function fileToBase64(file) {
   });
 }
 
+function capImageSize(file, maxWidth = 1600) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      if (img.width <= maxWidth) { resolve(file); return; }
+      const canvas = document.createElement('canvas');
+      const ratio = maxWidth / img.width;
+      canvas.width = maxWidth;
+      canvas.height = img.height * ratio;
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => resolve(new File([blob], file.name, { type: 'image/jpeg' })), 'image/jpeg', 0.92);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 const venuesDraftKey = id => `draft_upload_${id}`;
 const emptyVenue = () => ({ name: '', photos: [], manualItems: [] });
 
@@ -149,51 +165,74 @@ export default function UploadReceipts() {
     setLoading(true);
 
     try {
-      let parsed = { venues: [] };
       const venuesWithPhotos = venues.filter(v => v.name.trim() && v.photos.length > 0);
 
-      const [apiResult, photoUrlsByVenue] = await Promise.all([
-        // API parse (only if there are photos)
-        hasPhoto ? (async () => {
-          const venuePayloads = await Promise.all(
-            venuesWithPhotos.map(async venue => {
-              const photos = await Promise.all(venue.photos.map(fileToBase64));
-              return { venueName: venue.name.trim(), photos };
-            })
-          );
-          const apiUrl = import.meta.env.DEV
-            ? 'http://localhost:3001/api/parse-receipt'
-            : '/api/parse-receipt';
-          const res = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId, venues: venuePayloads }),
-          });
-          if (!res.ok) throw new Error('Parsing failed');
-          return res.json();
-        })() : Promise.resolve({ venues: [] }),
+      // Cap image sizes before any upload or API call
+      const cappedVenues = await Promise.all(
+        venuesWithPhotos.map(async venue => ({
+          ...venue,
+          cappedPhotos: await Promise.all(venue.photos.map(f => capImageSize(f))),
+        }))
+      );
 
-        // Storage upload (concurrent with API)
-        (async () => {
-          const result = {};
-          await Promise.all(
-            venuesWithPhotos.map(async venue => {
-              const urls = await Promise.all(
-                venue.photos.map(async (file, pi) => {
-                  const path = `receipts/${sessionId}/${venue.name.trim()}/${pi}_${Date.now()}.jpg`;
-                  const fileRef = storageRef(storage, path);
-                  await uploadBytes(fileRef, file);
-                  return getDownloadURL(fileRef);
-                })
-              );
-              result[venue.name.trim()] = urls;
-            })
-          );
-          return result;
-        })(),
-      ]);
+      // Storage upload (required — fail fast if it doesn't work)
+      const storagePromise = cappedVenues.length > 0
+        ? (async () => {
+            const result = {};
+            await Promise.all(
+              cappedVenues.map(async venue => {
+                const urls = await Promise.all(
+                  venue.cappedPhotos.map(async (file, pi) => {
+                    const path = `receipts/${sessionId}/${venue.name.trim()}/${pi}_${Date.now()}.jpg`;
+                    const fileRef = storageRef(storage, path);
+                    await uploadBytes(fileRef, file);
+                    return getDownloadURL(fileRef);
+                  })
+                );
+                result[venue.name.trim()] = urls;
+              })
+            );
+            return result;
+          })().catch(err => { throw Object.assign(err, { _source: 'storage' }); })
+        : Promise.resolve({});
 
-      parsed = apiResult;
+      // API parse (concurrent with Storage upload)
+      const apiPromise = hasPhoto
+        ? (async () => {
+            const venuePayloads = await Promise.all(
+              cappedVenues.map(async venue => {
+                const photos = await Promise.all(venue.cappedPhotos.map(fileToBase64));
+                return { venueName: venue.name.trim(), photos };
+              })
+            );
+            const apiUrl = import.meta.env.DEV
+              ? 'http://localhost:3001/api/parse-receipt'
+              : '/api/parse-receipt';
+            const res = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId, venues: venuePayloads }),
+            });
+            if (!res.ok) throw new Error('Parsing failed');
+            return res.json();
+          })().catch(err => { throw Object.assign(err, { _source: 'api' }); })
+        : Promise.resolve({ venues: [] });
+
+      let apiResult, photoUrlsByVenue;
+      try {
+        [apiResult, photoUrlsByVenue] = await Promise.all([apiPromise, storagePromise]);
+      } catch (err) {
+        if (err._source === 'storage') {
+          setError('Failed to save receipt photos. Please try again.');
+        } else {
+          setError('Something went wrong. Please try again.');
+        }
+        console.error(err);
+        setLoading(false);
+        return;
+      }
+
+      let parsed = apiResult;
 
       // Merge manual items
       for (const venue of venues) {
@@ -718,14 +757,16 @@ const styles = {
     padding: 0,
   },
   addCabBtn: {
-    fontSize: '12px',
-    color: 'var(--text-secondary)',
+    fontSize: '14px',
+    fontWeight: 500,
+    color: 'var(--text-primary)',
     fontFamily: 'system-ui, -apple-system, sans-serif',
     backgroundColor: 'transparent',
-    border: '0.5px dashed var(--border-color)',
-    borderRadius: '6px',
-    padding: '7px 12px',
+    border: '1px solid var(--border-color)',
+    borderRadius: '8px',
+    padding: '11px 16px',
     cursor: 'pointer',
+    marginTop: '8px',
     marginBottom: '8px',
     width: '100%',
     textAlign: 'center',

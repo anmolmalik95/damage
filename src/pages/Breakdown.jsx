@@ -226,7 +226,6 @@ export default function Breakdown() {
   const currentMember = members.find(m => m.id === currentMemberId);
   const isBillPayer = !isReadOnly && !!session.billPayer && session.billPayer === currentMemberId;
   const isAdmin = !isReadOnly && (currentMember?.isCreator === true || isBillPayer);
-  console.log('paymentInstructions:', session?.paymentInstructions, 'isBillPayer:', isBillPayer, 'isAdmin:', isAdmin);
   const isClosed = session.status === 'closed';
   const totalBill = venues.reduce((sum, v) => {
     const itemsTotal = v.items.reduce((s, i) => s + (i.unitPrice ?? 0) * (i.quantity ?? 1), 0);
@@ -277,32 +276,27 @@ export default function Breakdown() {
         </button>
       </div>
 
-      {/* Who pays whom */}
-      {!isReadOnly && session.billPayer && (
+      {/* Pay [Name] / You owe $X card — non-bill-payers only */}
+      {!isReadOnly && session.billPayer && currentMemberId !== session.billPayer && (
         <div style={s.owesCard}>
-          {currentMemberId === session.billPayer ? (
-            <span style={s.owesText}>You paid the bill. Everyone owes you.</span>
-          ) : (
-            <span style={s.owesText}>
-              You owe <strong>{members.find(m => m.id === session.billPayer)?.name ?? '?'}</strong>
-              {grandTotals[currentMemberId] != null ? ` $${grandTotals[currentMemberId].toFixed(2)}` : ''}
-            </span>
+          <div style={s.owesPayName}>
+            Pay {members.find(m => m.id === session.billPayer)?.name ?? '?'}
+          </div>
+          {grandTotals[currentMemberId] != null && (
+            <div style={s.owesAmount}>
+              You owe ${grandTotals[currentMemberId].toFixed(2)}
+            </div>
           )}
+          {session.paymentInstructions ? (
+            <div style={s.owesInstr}>
+              💬 {session.paymentInstructions}
+            </div>
+          ) : null}
         </div>
       )}
 
-      {/* Payment instructions */}
-      {session.paymentInstructions ? (
-        <div style={s.instrCard}>
-          <span style={s.instrIcon}>💬</span>
-          <div style={{ flex: 1 }}>
-            <div style={s.instrText}>{session.paymentInstructions}</div>
-            {(isAdmin || isBillPayer) && (
-              <button style={s.instrEditBtn} onClick={() => setEditingInstructions(true)}>Edit</button>
-            )}
-          </div>
-        </div>
-      ) : (isAdmin || isBillPayer) && (
+      {/* Payment instructions — for admin/bill payer editing, or read-only users */}
+      {(isAdmin || isBillPayer) && (
         editingInstructions ? (
           <div style={s.instrEditCard}>
             <textarea
@@ -318,12 +312,22 @@ export default function Breakdown() {
               <button style={s.instrSaveBtn} onClick={handleSaveInstructions}>Save</button>
             </div>
           </div>
-        ) : (
+        ) : !session.paymentInstructions ? (
           <button style={s.instrAddBtn} onClick={() => setEditingInstructions(true)}>
             + Add payment instructions
           </button>
-        )
+        ) : null
       )}
+
+      {/* Payment instructions card — read-only users (not a member) */}
+      {isReadOnly && session.paymentInstructions ? (
+        <div style={s.instrCard}>
+          <span style={s.instrIcon}>💬</span>
+          <div style={{ flex: 1 }}>
+            <div style={s.instrText}>{session.paymentInstructions}</div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Per-venue sections */}
       {venueDataMap.map(({ venue, memberData }) => {
@@ -644,8 +648,10 @@ const s = {
   taxHelper: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   receiptsBtn: { background: 'none', border: 'none', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'system-ui, -apple-system, sans-serif', padding: '0', marginLeft: 'auto', flexShrink: 0 },
   instrTextarea: { width: '100%', padding: '8px 10px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', resize: 'none', boxSizing: 'border-box', colorScheme: 'light dark' },
-  owesCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', border: '0.5px solid var(--border-color)' },
-  owesText: { fontSize: '13px', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  owesCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', padding: '14px 16px', marginBottom: '16px', border: '0.5px solid var(--border-color)' },
+  owesPayName: { fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  owesAmount: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '2px' },
+  owesInstr: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '8px', paddingTop: '8px', borderTop: '0.5px solid var(--border-color)' },
   instrCard: { display: 'flex', alignItems: 'flex-start', gap: '10px', backgroundColor: '#FAEEDA', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' },
   instrIcon: { fontSize: '16px', flexShrink: 0, marginTop: '1px' },
   instrText: { fontSize: '13px', color: '#633806', fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1.4 },

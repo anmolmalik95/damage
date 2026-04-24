@@ -4,5 +4,10 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  ],
+  "functions": {
+    "api/parse-receipt.js": {
+      "maxDuration": 60
+    }
+  }
 }

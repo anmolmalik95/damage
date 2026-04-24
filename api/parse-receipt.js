@@ -25,9 +25,13 @@ Return this exact JSON structure:
 }`;
 
 export default async function handler(req, res) {
+  console.log('1. Request received', new Date().toISOString());
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  console.log('2. Content-type:', req.headers['content-type']);
 
   const { sessionId, venues } = req.body;
 
@@ -35,11 +39,15 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid request body' });
   }
 
+  console.log('3. Venues count:', venues?.length);
+
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   try {
     const results = await Promise.all(
       venues.map(async ({ venueIndex, venueName, photos }) => {
+        console.log('4. Image sizes (bytes):', photos?.map(b => b.length));
+
         const imageMessages = photos.map(base64 => ({
           type: 'image_url',
           image_url: {
@@ -59,17 +67,21 @@ export default async function handler(req, res) {
           },
         ];
 
+        console.log('5. Calling OpenAI for venue:', venueName);
         let response = await client.chat.completions.create({
           model: 'gpt-4o',
           messages,
           response_format: { type: 'json_object' },
         });
+        console.log('6. OpenAI response received for venue:', venueName);
+
         let parsed = JSON.parse(response.choices[0].message.content);
 
         // Self-correction: if item sum differs from parsed subtotal by more than $1, re-prompt
         const itemSum = (parsed.items || []).reduce((s, i) => s + (i.quantity * i.unitPrice), 0);
         const subtotal = parsed.subtotal ?? 0;
         if (Math.abs(itemSum - subtotal) > 1) {
+          console.log('7. Running self-correction check for venue:', venueName, '— item sum:', itemSum, 'subtotal:', subtotal);
           messages.push(
             { role: 'assistant', content: response.choices[0].message.content },
             {
@@ -83,15 +95,18 @@ export default async function handler(req, res) {
             response_format: { type: 'json_object' },
           });
           parsed = JSON.parse(response.choices[0].message.content);
+        } else {
+          console.log('7. Self-correction not needed for venue:', venueName);
         }
 
         return { venueIndex, venueName, ...parsed };
       })
     );
 
+    console.log('8. Returning final response, venues:', results.length);
     return res.status(200).json({ venues: results });
   } catch (err) {
-    console.error('parse-receipt error:', err.message);
+    console.error('parse-receipt error:', err.message, err.stack);
     return res.status(500).json({ error: 'Failed to parse receipt' });
   }
 }
