@@ -66,6 +66,8 @@ export default function ClaimItems() {
   const [finaliseLoading, setFinaliseLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [billPayerPickerOpen, setBillPayerPickerOpen] = useState(false);
+  const [billPayersSheetOpen, setBillPayersSheetOpen] = useState(false);
+  const [venueBillPayers, setVenueBillPayers] = useState({});
   const [endSessionConfirmOpen, setEndSessionConfirmOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
@@ -115,6 +117,9 @@ export default function ClaimItems() {
         })
       );
       setVenues(list);
+      const initial = {};
+      list.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
+      setVenueBillPayers(initial);
     });
 
     return () => { unsubSession(); unsubMembers(); unsubClaims(); };
@@ -359,6 +364,13 @@ export default function ClaimItems() {
     await updateDoc(doc(db, 'sessions', sessionId), { billPayer: memberId });
     setBillPayerPickerOpen(false);
     showToast('Bill payer updated', 'success');
+  }
+
+  async function handleSetVenueBillPayer(venueId, memberId) {
+    setVenueBillPayers(prev => ({ ...prev, [venueId]: memberId }));
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId, 'venues', venueId), { billPayer: memberId });
+    } catch (err) { console.error(err); }
   }
 
   async function handleEndSessionFromMenu() {
@@ -659,13 +671,20 @@ export default function ClaimItems() {
 
       {/* Finalise — creator only */}
       {isCreator && (
-        <button
-          style={{ ...s.finaliseBtn, opacity: (finaliseLoading || session?.editingItems) ? 0.6 : 1, marginTop: '16px' }}
-          onClick={handleFinalise}
-          disabled={finaliseLoading || !!session?.editingItems}
-        >
-          {finaliseLoading ? 'Finalising…' : 'Finalise & lock session'}
-        </button>
+        <div style={{ marginTop: '16px' }}>
+          <button
+            style={{ ...s.finaliseBtn, opacity: (finaliseLoading || session?.editingItems) ? 0.6 : 1 }}
+            onClick={handleFinalise}
+            disabled={finaliseLoading || !!session?.editingItems}
+          >
+            {finaliseLoading ? 'Finalising…' : 'Finalise & lock session'}
+          </button>
+          {session?.editingItems && !finaliseLoading && (
+            <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+              Items are being edited — wait for changes to be saved
+            </div>
+          )}
+        </div>
       )}
 
       {/* Editing overlay — shown to everyone except the person editing */}
@@ -688,6 +707,7 @@ export default function ClaimItems() {
             { icon: '✏️', label: 'Rename session', action: () => { setMenuOpen(false); setRenameValue(session?.name ?? ''); setRenameOpen(true); } },
             { icon: '👥', label: 'Manage people', action: () => { setMenuOpen(false); navigateForward(`/session/${sessionId}/manage-people`); } },
             { icon: '👤', label: 'Change bill payer', action: () => { setMenuOpen(false); setBillPayerPickerOpen(true); } },
+            { icon: '🏦', label: 'Manage bill payers', action: () => { setMenuOpen(false); setBillPayersSheetOpen(true); } },
             { icon: '📤', label: 'Export order log', action: handleExport },
             { icon: '🖊️', label: 'Edit items', action: async () => {
               setMenuOpen(false);
@@ -738,6 +758,40 @@ export default function ClaimItems() {
                 {session?.billPayer === member.id && <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginLeft: 'auto' }}>Current</span>}
               </div>
             ))}
+          </div>
+        </>
+      )}
+
+      {/* Manage bill payers sheet */}
+      {billPayersSheetOpen && (
+        <>
+          <div style={s.backdrop} onClick={() => setBillPayersSheetOpen(false)} />
+          <div style={s.sheet}>
+            <div style={s.sheetHandle} />
+            <div style={s.sheetTitle}>Manage bill payers</div>
+            <div style={s.sheetSubtitle}>Set who paid for each venue.</div>
+            {venues.map(venue => (
+              <div key={venue.id} style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                  {venue.name}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {members.map(m => {
+                    const sel = venueBillPayers[venue.id] === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: sel ? 'var(--text-primary)' : 'var(--bg-secondary)', color: sel ? 'var(--bg-primary)' : 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        onClick={() => handleSetVenueBillPayer(venue.id, m.id)}
+                      >
+                        {m.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <button style={s.sheetConfirmBtn} onClick={() => setBillPayersSheetOpen(false)}>Done</button>
           </div>
         </>
       )}

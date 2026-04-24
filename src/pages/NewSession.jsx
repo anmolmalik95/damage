@@ -183,6 +183,12 @@ export default function NewSession() {
           ) : 'Continue →'}
         </button>
 
+        {(!eventName.trim() || !date || !userName.trim()) && !loading && (
+          <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+            Fill in all fields to continue
+          </div>
+        )}
+
         {error && <p style={styles.error}>{error}</p>}
       </form>
     </PageContainer>

@@ -19,6 +19,9 @@ export default function ShareSession() {
   const [session, setSession] = useState(null);
   const [sessionTotal, setSessionTotal] = useState(() => location.state?.total ?? 0);
   const [billPayer, setBillPayer] = useState(currentMemberId);
+  const [multiPayer, setMultiPayer] = useState(false);
+  const [venues, setVenues] = useState([]);
+  const [venuePayers, setVenuePayers] = useState({});
   const [newName, setNewName] = useState('');
   const [members, setMembers] = useState(() => {
     try {
@@ -65,6 +68,18 @@ export default function ShareSession() {
     load();
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    async function loadVenues() {
+      const vSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
+      const list = vSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setVenues(list);
+      const initial = {};
+      list.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
+      setVenuePayers(initial);
+    }
+    loadVenues();
+  }, [sessionId]);
+
   function sessionUrl() { return `${BASE_URL}/${sessionId}`; }
 
   async function handleCopy() {
@@ -102,8 +117,12 @@ export default function ShareSession() {
     setPaymentInstructions(val);
     clearTimeout(instrDebounceRef.current);
     instrDebounceRef.current = setTimeout(async () => {
-      try { await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions: val }); }
-      catch (err) { console.error(err); }
+      try {
+        await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions: val });
+        if (billPayer) {
+          await updateDoc(doc(db, 'sessions', sessionId, 'members', billPayer), { paymentInstructions: val }).catch(() => {});
+        }
+      } catch (err) { console.error(err); }
     }, 1000);
   }
 
@@ -123,11 +142,24 @@ export default function ShareSession() {
     } catch (err) { console.error(err); }
   }
 
+  function handleSetVenuePayer(venueId, memberId) {
+    setVenuePayers(prev => ({ ...prev, [venueId]: memberId }));
+  }
+
   async function handleOpen() {
     setError('');
     setOpening(true);
     try {
-      await updateDoc(doc(db, 'sessions', sessionId), { status: 'open' });
+      if (multiPayer) {
+        await updateDoc(doc(db, 'sessions', sessionId), { status: 'open', multiPayer: true });
+        await Promise.all(
+          venues
+            .filter(v => venuePayers[v.id])
+            .map(v => updateDoc(doc(db, 'sessions', sessionId, 'venues', v.id), { billPayer: venuePayers[v.id] }))
+        );
+      } else {
+        await updateDoc(doc(db, 'sessions', sessionId), { status: 'open', billPayer, multiPayer: false });
+      }
       sessionStorage.removeItem(membersDraftKey(sessionId));
       sessionStorage.removeItem(`draft_confirm_${sessionId}`);
       navigate(`/session/${sessionId}/claim`);
@@ -143,6 +175,10 @@ export default function ShareSession() {
     { id: currentMemberId, name: currentMemberName ?? session?.creatorName ?? 'You' },
     ...members,
   ];
+
+  const canOpen = multiPayer
+    ? venues.length > 0 && venues.every(v => !!venuePayers[v.id])
+    : !!billPayer;
 
   return (
     <PageContainer>
@@ -166,41 +202,6 @@ export default function ShareSession() {
       <button style={styles.btnPrimary} onClick={handleCopy}>
         Copy link to clipboard
       </button>
-
-      {/* Bill payer — before the divider */}
-      <div style={styles.billPayerSection}>
-        <div style={styles.billPayerTitle}>Who paid the bill?</div>
-        <div style={styles.billPayerSubtitle}>Select the person who fronted the money.</div>
-        <div style={styles.chipRow}>
-          {allChipMembers.map(m => {
-            const sel = billPayer === m.id;
-            return (
-              <button
-                key={m.id}
-                style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
-                onClick={() => handleSetBillPayer(m.id)}
-              >
-                {m.name}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Payment instructions */}
-      <div style={styles.instrSection}>
-        <div style={styles.instrLabel}>Payment instructions</div>
-        <div style={styles.instrSub}>e.g. "PayNow to +65 9xxx xxxx — save to contacts as John"</div>
-        <textarea
-          style={styles.instrTextarea}
-          value={paymentInstructions}
-          onChange={e => handleInstructionsChange(e.target.value)}
-          placeholder="PayNow to 9XXX XXXX"
-          rows={3}
-          maxLength={200}
-        />
-        <div style={styles.instrCounter}>{paymentInstructions.length}/200</div>
-      </div>
 
       {/* Divider */}
       <div style={styles.dividerRow}>
@@ -234,16 +235,91 @@ export default function ShareSession() {
         </div>
       )}
 
+      {/* Who paid */}
+      <div style={styles.billPayerSection}>
+        <div style={styles.billPayerTitle}>Who paid the bill?</div>
+        <div style={styles.billPayerSubtitle}>Select the person who fronted the money.</div>
+
+        {/* Multi-payer toggle */}
+        <button
+          style={{ ...styles.toggleBtn, ...(multiPayer ? styles.toggleBtnActive : {}) }}
+          onClick={() => setMultiPayer(p => !p)}
+        >
+          {multiPayer ? '✓ Multiple bill payers (per venue)' : 'Multiple bill payers (per venue)'}
+        </button>
+
+        {!multiPayer ? (
+          <div style={styles.chipRow}>
+            {allChipMembers.map(m => {
+              const sel = billPayer === m.id;
+              return (
+                <button
+                  key={m.id}
+                  style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
+                  onClick={() => handleSetBillPayer(m.id)}
+                >
+                  {m.name}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={styles.venuePayersSection}>
+            {venues.map(venue => (
+              <div key={venue.id} style={styles.venuePayerBlock}>
+                <div style={styles.venuePayerLabel}>{venue.name}</div>
+                <div style={styles.chipRow}>
+                  {allChipMembers.map(m => {
+                    const sel = venuePayers[venue.id] === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
+                        onClick={() => handleSetVenuePayer(venue.id, m.id)}
+                      >
+                        {m.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Payment instructions — single-payer mode only */}
+      {!multiPayer && (
+        <div style={styles.instrSection}>
+          <div style={styles.instrLabel}>Payment instructions</div>
+          <div style={styles.instrSub}>e.g. "PayNow to +65 9xxx xxxx — save to contacts as John"</div>
+          <textarea
+            style={styles.instrTextarea}
+            value={paymentInstructions}
+            onChange={e => handleInstructionsChange(e.target.value)}
+            placeholder="PayNow to 9XXX XXXX"
+            rows={3}
+            maxLength={200}
+          />
+          <div style={styles.instrCounter}>{paymentInstructions.length}/200</div>
+        </div>
+      )}
+
       {error && <p style={styles.error}>{error}</p>}
 
       <div style={styles.openButtonWrap}>
         <button
-          style={{ ...styles.btnPrimary, opacity: opening ? 0.6 : 1 }}
+          style={{ ...styles.btnPrimary, opacity: (opening || !canOpen) ? 0.4 : 1 }}
           onClick={handleOpen}
-          disabled={opening}
+          disabled={opening || !canOpen}
         >
           {opening ? 'Opening...' : 'Open session →'}
         </button>
+        {!canOpen && !opening && (
+          <div style={styles.tipText}>
+            {multiPayer ? 'Select a bill payer for each venue to continue' : 'Select who paid the bill to continue'}
+          </div>
+        )}
       </div>
     </PageContainer>
   );
@@ -270,12 +346,18 @@ const styles = {
   memberName: { fontSize: '14px', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   removeBtn: { background: 'none', border: 'none', fontSize: '13px', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' },
   billPayerSection: { marginTop: '20px', marginBottom: '8px' },
-  billPayerTitle: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
+  billPayerTitle: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '4px' },
   billPayerSubtitle: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' },
+  toggleBtn: { padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', cursor: 'pointer', marginBottom: '12px' },
+  toggleBtnActive: { backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '0.5px solid var(--text-primary)', fontWeight: 500 },
   chipRow: { display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' },
   chip: { padding: '8px 16px', borderRadius: '20px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 },
   chipSel: { backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', border: '0.5px solid var(--text-primary)' },
-  openButtonWrap: { marginTop: '16px' },
+  venuePayersSection: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  venuePayerBlock: {},
+  venuePayerLabel: { fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' },
+  openButtonWrap: { marginTop: '20px' },
+  tipText: { textAlign: 'center', marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   error: { fontSize: '12px', color: 'var(--color-danger)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '8px' },
   instrSection: { marginTop: '20px', marginBottom: '8px' },
   instrLabel: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '4px' },

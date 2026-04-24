@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, Fragment } from 'react';
 import { useParams } from 'react-router-dom';
 import { useNavigation } from '../context/NavigationContext';
 import {
-  doc, getDocs, collection, updateDoc, deleteDoc, writeBatch,
+  doc, getDocs, collection, updateDoc, deleteDoc, writeBatch, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
@@ -14,6 +14,7 @@ export default function EditItems() {
   const currentMemberId = localStorage.getItem(`member_${sessionId}`);
 
   const [venues, setVenues] = useState([]);
+  const [cabs, setCabs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletedItemIds, setDeletedItemIds] = useState({}); // { [venueId]: Set<firestoreId> }
@@ -85,6 +86,27 @@ export default function EditItems() {
     setEditingKey(null);
   }
 
+  function addCab() {
+    setCabs(prev => [...prev, { id: `cab_${Date.now()}`, from: '', to: '', price: '', paidByName: '' }]);
+  }
+
+  function updateCab(id, field, value) {
+    setCabs(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  }
+
+  function removeCab(id) {
+    setCabs(prev => prev.filter(c => c.id !== id));
+  }
+
+  function cabName(cab) {
+    const from = cab.from.trim();
+    const to = cab.to.trim();
+    if (from && to) return `Cab from ${from} to ${to}`;
+    if (from) return `Cab from ${from}`;
+    if (to) return `Cab to ${to}`;
+    return 'Cab';
+  }
+
   function addItem(venueId) {
     const newId = `new_${Date.now()}`;
     setVenues(prev => prev.map(v =>
@@ -143,6 +165,41 @@ export default function EditItems() {
               quantity: newQty,
               unitPrice: Number(item.unitPrice) || 0,
               totalPrice: newQty * (Number(item.unitPrice) || 0),
+            });
+          }
+        }
+      }
+
+      // Add new cabs to Transport venue
+      const validCabs = cabs.filter(c => parseFloat(c.price) > 0);
+      if (validCabs.length > 0) {
+        const transportVenue = venues.find(v => v.name === 'Transport' || v.isTransport);
+        if (transportVenue) {
+          for (const cab of validCabs) {
+            const cabRef = doc(collection(db, 'sessions', sessionId, 'venues', transportVenue.id, 'items'));
+            batch.set(cabRef, {
+              name: cabName(cab),
+              quantity: 1,
+              unitPrice: parseFloat(cab.price) || 0,
+              totalPrice: parseFloat(cab.price) || 0,
+              ...(cab.paidByName.trim() ? { paidByName: cab.paidByName.trim() } : {}),
+            });
+          }
+        } else {
+          const tvRef = doc(collection(db, 'sessions', sessionId, 'venues'));
+          batch.set(tvRef, {
+            name: 'Transport', isTransport: true, gstPercent: null, gstAmount: 0,
+            serviceChargePercent: null, serviceChargeAmount: 0, receiptTotal: 0,
+            createdAt: serverTimestamp(),
+          });
+          for (const cab of validCabs) {
+            const cabRef = doc(collection(db, 'sessions', sessionId, 'venues', tvRef.id, 'items'));
+            batch.set(cabRef, {
+              name: cabName(cab),
+              quantity: 1,
+              unitPrice: parseFloat(cab.price) || 0,
+              totalPrice: parseFloat(cab.price) || 0,
+              ...(cab.paidByName.trim() ? { paidByName: cab.paidByName.trim() } : {}),
             });
           }
         }
@@ -255,6 +312,28 @@ export default function EditItems() {
         </Fragment>
       ))}
 
+      {/* Add cabs */}
+      {cabs.length > 0 && (
+        <div style={st.cabsBlock}>
+          <div style={st.cabsHeader}>Add cabs / transport</div>
+          {cabs.map(cab => (
+            <div key={cab.id} style={{ marginBottom: '8px' }}>
+              <div style={st.cabRow}>
+                <input style={{ ...st.cabInput, flex: 1 }} type="text" value={cab.from} onChange={e => updateCab(cab.id, 'from', e.target.value)} placeholder="From" />
+                <input style={{ ...st.cabInput, flex: 1 }} type="text" value={cab.to} onChange={e => updateCab(cab.id, 'to', e.target.value)} placeholder="To" />
+                <input style={{ ...st.cabInput, width: '72px' }} type="number" value={cab.price} step="0.01" min="0" onChange={e => updateCab(cab.id, 'price', e.target.value)} placeholder="$0.00" />
+                <button style={st.cabRemoveBtn} onClick={() => removeCab(cab.id)}>×</button>
+              </div>
+              <div style={st.cabPayerRow}>
+                <span style={st.cabPayerLabel}>Paid by</span>
+                <input style={st.cabPayerInput} type="text" value={cab.paidByName} onChange={e => updateCab(cab.id, 'paidByName', e.target.value)} placeholder="Name" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <button style={st.addCabBtn} onClick={addCab}>+ Add cab</button>
+
       <div style={st.bottomBtns}>
         <button
           style={{ ...st.saveBtn, opacity: saving ? 0.6 : 1 }}
@@ -330,6 +409,15 @@ const st = {
   deleteLink: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: 'var(--color-danger)', fontFamily: 'system-ui, -apple-system, sans-serif', padding: 0 },
   doneLink: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', padding: 0 },
   addItemLink: { display: 'block', width: '100%', padding: '10px 14px', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-primary)', border: 'none', borderTop: '0.5px dashed var(--border-color)', textAlign: 'center', cursor: 'pointer', boxSizing: 'border-box' },
+  cabsBlock: { backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', padding: '12px 14px', marginBottom: '8px' },
+  cabsHeader: { fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' },
+  cabRow: { display: 'flex', gap: '6px', alignItems: 'center' },
+  cabInput: { padding: '7px 8px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', colorScheme: 'light dark', minWidth: 0 },
+  cabRemoveBtn: { width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, padding: 0 },
+  cabPayerRow: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' },
+  cabPayerLabel: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0, minWidth: '44px' },
+  cabPayerInput: { padding: '5px 8px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', colorScheme: 'light dark', flex: 1 },
+  addCabBtn: { width: '100%', padding: '10px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', color: 'var(--text-secondary)', backgroundColor: 'transparent', border: '0.5px dashed var(--border-color)', borderRadius: '8px', cursor: 'pointer', marginBottom: '8px', textAlign: 'center' },
   bottomBtns: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingBottom: '16px' },
   saveBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)', border: 'none', borderRadius: '8px', cursor: 'pointer' },
   rescanBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' },

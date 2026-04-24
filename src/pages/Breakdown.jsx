@@ -168,6 +168,9 @@ export default function Breakdown() {
   async function handleSaveInstrSheet() {
     try {
       await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions: instrSheetDraft });
+      if (session?.billPayer) {
+        await updateDoc(doc(db, 'sessions', sessionId, 'members', session.billPayer), { paymentInstructions: instrSheetDraft }).catch(() => {});
+      }
       setPaymentInstructions(instrSheetDraft);
       setInstrSheetOpen(false);
       showToast('Payment instructions saved', 'success');
@@ -251,6 +254,36 @@ export default function Breakdown() {
     }
   }
 
+  // Build debt transactions: single-payer or multi-payer debt graph
+  function buildDebtTransactions() {
+    if (!session.multiPayer) return [];
+
+    const netBalances = {};
+    for (const { venue, memberData } of venueDataMap) {
+      const vBillPayer = venue.billPayer;
+      if (!vBillPayer) continue;
+      for (const [memberId, data] of Object.entries(memberData)) {
+        if (memberId === vBillPayer) continue;
+        netBalances[memberId] = (netBalances[memberId] || 0) - data.total;
+        netBalances[vBillPayer] = (netBalances[vBillPayer] || 0) + data.total;
+      }
+    }
+    const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
+    const transactions = [];
+    for (let i = 0; i < 500; i++) {
+      const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
+      const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
+      if (creditor.bal < 0.005 || debtor.bal > -0.005) break;
+      const amount = Math.min(creditor.bal, -debtor.bal);
+      transactions.push({ fromId: debtor.id, toId: creditor.id, amount: Math.round(amount * 100) / 100 });
+      creditor.bal -= amount;
+      debtor.bal += amount;
+    }
+    return transactions;
+  }
+
+  const debtTransactions = buildDebtTransactions();
+
   const memberIndex = Object.fromEntries(members.map((m, i) => [m.id, i]));
   const sortedVenueDataMap = [...venueDataMap].sort((a, b) => {
     const aT = a.venue.isTransport || a.venue.name === 'Transport';
@@ -283,8 +316,8 @@ export default function Breakdown() {
         </button>
       </div>
 
-      {/* Pay [Name] / You owe $X card — non-bill-payers only */}
-      {!isReadOnly && session.billPayer && currentMemberId !== session.billPayer && (
+      {/* Single-payer: Pay [Name] / You owe $X card */}
+      {!isReadOnly && !session.multiPayer && session.billPayer && currentMemberId !== session.billPayer && (
         <div style={s.owesCard}>
           <div style={s.owesPayName}>
             Pay {members.find(m => m.id === session.billPayer)?.name ?? '?'}
@@ -294,12 +327,32 @@ export default function Breakdown() {
               You owe ${grandTotals[currentMemberId].toFixed(2)}
             </div>
           )}
-          {session.paymentInstructions ? (
-            <div style={s.owesInstr}>
-              💬 {session.paymentInstructions}
-            </div>
-          ) : null}
+          {(() => {
+            const payer = members.find(m => m.id === session.billPayer);
+            const instr = payer?.paymentInstructions ?? session.paymentInstructions;
+            return instr ? <div style={s.owesInstr}>💬 {instr}</div> : null;
+          })()}
         </div>
+      )}
+
+      {/* Multi-payer: per-creditor debt cards */}
+      {!isReadOnly && session.multiPayer && debtTransactions.length > 0 && (
+        <>
+          {debtTransactions
+            .filter(t => t.fromId === currentMemberId || t.toId === currentMemberId)
+            .map((t, i) => {
+              const isOwing = t.fromId === currentMemberId;
+              const other = members.find(m => m.id === (isOwing ? t.toId : t.fromId));
+              const instr = other?.paymentInstructions;
+              return (
+                <div key={i} style={{ ...s.owesCard, marginBottom: '12px' }}>
+                  <div style={s.owesPayName}>{isOwing ? `Pay ${other?.name ?? '?'}` : `${other?.name ?? '?'} owes you`}</div>
+                  <div style={s.owesAmount}>{isOwing ? 'You owe' : "You're owed"} ${t.amount.toFixed(2)}</div>
+                  {isOwing && instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
+                </div>
+              );
+            })}
+        </>
       )}
 
       {/* Payment instructions — for admin/bill payer editing, or read-only users */}

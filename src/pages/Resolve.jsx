@@ -329,6 +329,11 @@ export default function Resolve() {
         >
           {saving ? 'Saving…' : 'Confirm & generate breakdown →'}
         </button>
+        {!allResolved && (
+          <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+            Assign all unclaimed items to continue
+          </div>
+        )}
       </div>
     </PageContainer>
   );

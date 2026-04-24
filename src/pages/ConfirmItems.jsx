@@ -18,6 +18,7 @@ function parsedToVenues(parsed) {
       name: item.name,
       quantity: item.quantity ?? 1,
       unitPrice: item.unitPrice ?? 0,
+      ...(item.paidByName ? { paidByName: item.paidByName } : {}),
     })),
   }));
 }
@@ -240,6 +241,7 @@ export default function ConfirmItems() {
                 quantity: Number(item.quantity),
                 unitPrice: Number(item.unitPrice),
                 totalPrice: Number(item.quantity) * Number(item.unitPrice),
+                ...(item.paidByName ? { paidByName: item.paidByName } : {}),
               })
             )
           );

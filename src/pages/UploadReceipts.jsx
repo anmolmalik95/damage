@@ -125,7 +125,7 @@ export default function UploadReceipts() {
   }
 
   function addCab() {
-    setCabs(prev => [...prev, { id: `cab_${Date.now()}`, from: '', to: '', price: '' }]);
+    setCabs(prev => [...prev, { id: `cab_${Date.now()}`, from: '', to: '', price: '', paidByName: '' }]);
   }
 
   function updateCab(id, field, value) {
@@ -248,6 +248,7 @@ export default function UploadReceipts() {
           name: cabName(c),
           quantity: 1,
           unitPrice: parseFloat(c.price) || 0,
+          ...(c.paidByName.trim() ? { paidByName: c.paidByName.trim() } : {}),
         }));
         const existing = parsed.venues?.find(v => (v.venueName || v.name) === 'Transport');
         if (existing) {
@@ -352,31 +353,43 @@ export default function UploadReceipts() {
         <div style={styles.cabsBlock}>
           <div style={styles.cabsHeader}>Cabs / Transport</div>
           {cabs.map(cab => (
-            <div key={cab.id} style={styles.cabRow}>
-              <input
-                style={{ ...styles.cabInput, flex: 1 }}
-                type="text"
-                value={cab.from}
-                onChange={e => updateCab(cab.id, 'from', e.target.value)}
-                placeholder="From"
-              />
-              <input
-                style={{ ...styles.cabInput, flex: 1 }}
-                type="text"
-                value={cab.to}
-                onChange={e => updateCab(cab.id, 'to', e.target.value)}
-                placeholder="To"
-              />
-              <input
-                style={{ ...styles.cabInput, width: '72px' }}
-                type="number"
-                value={cab.price}
-                step="0.01"
-                min="0"
-                onChange={e => updateCab(cab.id, 'price', e.target.value)}
-                placeholder="$0.00"
-              />
-              <button style={styles.cabRemoveBtn} onClick={() => removeCab(cab.id)}>×</button>
+            <div key={cab.id} style={{ marginBottom: '8px' }}>
+              <div style={styles.cabRow}>
+                <input
+                  style={{ ...styles.cabInput, flex: 1 }}
+                  type="text"
+                  value={cab.from}
+                  onChange={e => updateCab(cab.id, 'from', e.target.value)}
+                  placeholder="From"
+                />
+                <input
+                  style={{ ...styles.cabInput, flex: 1 }}
+                  type="text"
+                  value={cab.to}
+                  onChange={e => updateCab(cab.id, 'to', e.target.value)}
+                  placeholder="To"
+                />
+                <input
+                  style={{ ...styles.cabInput, width: '72px' }}
+                  type="number"
+                  value={cab.price}
+                  step="0.01"
+                  min="0"
+                  onChange={e => updateCab(cab.id, 'price', e.target.value)}
+                  placeholder="$0.00"
+                />
+                <button style={styles.cabRemoveBtn} onClick={() => removeCab(cab.id)}>×</button>
+              </div>
+              <div style={styles.cabPayerRow}>
+                <span style={styles.cabPayerLabel}>Paid by</span>
+                <input
+                  style={styles.cabPayerInput}
+                  type="text"
+                  value={cab.paidByName}
+                  onChange={e => updateCab(cab.id, 'paidByName', e.target.value)}
+                  placeholder={session?.creatorName ?? 'Name'}
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -772,6 +785,9 @@ const styles = {
     flexShrink: 0,
     padding: 0,
   },
+  cabPayerRow: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' },
+  cabPayerLabel: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0, minWidth: '44px' },
+  cabPayerInput: { padding: '5px 8px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', colorScheme: 'light dark', flex: 1 },
   addCabBtn: {
     fontSize: '14px',
     fontWeight: 500,
