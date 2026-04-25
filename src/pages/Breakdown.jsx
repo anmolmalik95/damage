@@ -159,6 +159,21 @@ export default function Breakdown() {
     });
   }
 
+  async function handleSelfReportPaid() {
+    const myData = paidStatus[currentMemberId] ?? {};
+    const isPaid = myData.paid ?? false;
+    const isSelfReported = myData.selfReported ?? false;
+    if (isPaid && isSelfReported) {
+      await setDoc(doc(db, 'sessions', sessionId, 'breakdown', currentMemberId), {
+        paid: false, selfReported: false, paidAt: null,
+      });
+    } else {
+      await setDoc(doc(db, 'sessions', sessionId, 'breakdown', currentMemberId), {
+        paid: true, selfReported: true, paidAt: serverTimestamp(),
+      });
+    }
+  }
+
   async function handleClose() {
     setSaving(true);
     try {
@@ -522,6 +537,29 @@ export default function Breakdown() {
         );
       })}
 
+      {/* I've paid — non-bill-payer, non-admin only */}
+      {(() => {
+        if (isReadOnly || isAdmin || isBillPayer) return null;
+        const myData = paidStatus[currentMemberId] ?? {};
+        const myPaid = myData.paid ?? false;
+        const mySelfReported = myData.selfReported ?? false;
+        if (myPaid && !mySelfReported) return null;
+        const billPayerName = members.find(m => m.id === session?.billPayer)?.name ?? 'the bill payer';
+        return (
+          <div style={s.selfPaidWrap}>
+            <button
+              style={myPaid && mySelfReported ? s.selfPaidDoneBtn : s.selfPaidBtn}
+              onClick={handleSelfReportPaid}
+            >
+              {myPaid && mySelfReported ? "Marked as paid ✓ · Undo" : "I've paid"}
+            </button>
+            {!(myPaid && mySelfReported) && (
+              <div style={s.selfPaidHint}>Let {billPayerName} know you've settled up.</div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Bottom buttons */}
       <div style={s.bottomBtns}>
         <button style={s.shareBtn} onClick={handleCopyLink}>
@@ -813,6 +851,10 @@ const s = {
   taxRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' },
   taxLabel: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   taxAmt: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  selfPaidWrap: { marginTop: '8px', marginBottom: '4px' },
+  selfPaidBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' },
+  selfPaidDoneBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#EAF3DE', color: '#27500A', border: 'none', borderRadius: '8px', cursor: 'pointer' },
+  selfPaidHint: { textAlign: 'center', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '6px' },
   bottomBtns: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingBottom: '16px' },
   shareBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 600, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', border: 'none', borderRadius: '8px', cursor: 'pointer' },
   reopenBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' },

@@ -706,7 +706,6 @@ export default function ClaimItems() {
           ...(isCreator ? [
             { icon: '✏️', label: 'Rename session', action: () => { setMenuOpen(false); setRenameValue(session?.name ?? ''); setRenameOpen(true); } },
             { icon: '👥', label: 'Manage people', action: () => { setMenuOpen(false); navigateForward(`/session/${sessionId}/manage-people`); } },
-            { icon: '👤', label: 'Change bill payer', action: () => { setMenuOpen(false); setBillPayerPickerOpen(true); } },
             { icon: '🏦', label: 'Manage bill payers', action: () => { setMenuOpen(false); setBillPayersSheetOpen(true); } },
             { icon: '📤', label: 'Export order log', action: handleExport },
             { icon: '🖊️', label: 'Edit items', action: async () => {

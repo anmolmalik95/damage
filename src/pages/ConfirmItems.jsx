@@ -4,6 +4,31 @@ import { doc, getDoc, getDocs, collection, addDoc, deleteDoc, serverTimestamp } 
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function capImageSize(file, maxWidth = 1200) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      if (img.width <= maxWidth) { resolve(file); return; }
+      const canvas = document.createElement('canvas');
+      const ratio = maxWidth / img.width;
+      canvas.width = maxWidth;
+      canvas.height = img.height * ratio;
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => resolve(new File([blob], file.name, { type: 'image/jpeg' })), 'image/jpeg', 0.85);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 const draftKey = id => `draft_confirm_${id}`;
 
 function parsedToVenues(parsed) {
@@ -43,12 +68,32 @@ export default function ConfirmItems() {
   const [error, setError] = useState('');
   const [editingKey, setEditingKey] = useState(null);
 
+  // Add venue sheet state
+  const [addVenueOpen, setAddVenueOpen] = useState(false);
+  const [addVenueStep, setAddVenueStep] = useState('upload');
+  const [newVenueName, setNewVenueName] = useState('');
+  const [newVenuePhotos, setNewVenuePhotos] = useState([]);
+  const [newVenueManualItems, setNewVenueManualItems] = useState([]);
+  const [newVenueItems, setNewVenueItems] = useState([]);
+  const [newVenueGst, setNewVenueGst] = useState(null);
+  const [newVenueSc, setNewVenueSc] = useState(null);
+  const [newVenueReceiptTotal, setNewVenueReceiptTotal] = useState(0);
+  const [newVenueUserReceiptTotal, setNewVenueUserReceiptTotal] = useState('');
+  const [newVenueLoading, setNewVenueLoading] = useState(false);
+  const [newVenueError, setNewVenueError] = useState('');
+  const [sheetEditingKey, setSheetEditingKey] = useState(null);
+
   const venuesRef = useRef(venues);
   const editingValuesRef = useRef({ quantity: 0, unitPrice: 0, name: '' });
   const prevEditingKeyRef = useRef(null);
+  const sheetEditValuesRef = useRef({ quantity: 1, unitPrice: 0, name: '' });
+  const prevSheetEditingKeyRef = useRef(null);
+  const newVenueItemsRef = useRef([]);
+  const sheetPhotoRef = useRef(null);
 
   // Keep venuesRef current so the editingKey effect can read live state without a stale closure.
   useEffect(() => { venuesRef.current = venues; }, [venues]);
+  useEffect(() => { newVenueItemsRef.current = newVenueItems; }, [newVenueItems]);
 
   // Commit edited values to state whenever edit mode closes or switches to a different item.
   useEffect(() => {
@@ -83,6 +128,24 @@ export default function ConfirmItems() {
     }
     prevEditingKeyRef.current = editingKey;
   }, [editingKey]);
+
+  // Commit sheet item edits when editing key changes
+  useEffect(() => {
+    const prevKey = prevSheetEditingKeyRef.current;
+    if (prevKey !== null && prevKey !== sheetEditingKey) {
+      const itemId = Number(prevKey);
+      const { quantity, unitPrice, name } = sheetEditValuesRef.current;
+      setNewVenueItems(prev => prev.map(item =>
+        item.id !== itemId ? item : { ...item, quantity: Number(quantity), unitPrice: Number(unitPrice), name }
+      ));
+    }
+    if (sheetEditingKey !== null) {
+      const itemId = Number(sheetEditingKey);
+      const item = newVenueItemsRef.current.find(i => i.id === itemId);
+      if (item) sheetEditValuesRef.current = { quantity: item.quantity, unitPrice: item.unitPrice, name: item.name };
+    }
+    prevSheetEditingKeyRef.current = sheetEditingKey;
+  }, [sheetEditingKey]);
 
   useEffect(() => {
     document.title = session?.name ? `Confirm items · ${session.name} — Unfuck` : 'Unfuck';
@@ -181,6 +244,123 @@ export default function ConfirmItems() {
     setVenues(prev => prev.map((v, i) =>
       i !== vi ? v : { ...v, userReceiptTotal: value }
     ));
+  }
+
+  function resetAddVenueSheet() {
+    setAddVenueOpen(false);
+    setAddVenueStep('upload');
+    setNewVenueName('');
+    setNewVenuePhotos([]);
+    setNewVenueManualItems([]);
+    setNewVenueItems([]);
+    setNewVenueGst(null);
+    setNewVenueSc(null);
+    setNewVenueReceiptTotal(0);
+    setNewVenueUserReceiptTotal('');
+    setNewVenueError('');
+    setSheetEditingKey(null);
+  }
+
+  function sheetSubtotal() {
+    return newVenueItems.reduce((s, item) => s + item.quantity * item.unitPrice, 0);
+  }
+  function sheetGstAmount() {
+    if (!newVenueGst) return 0;
+    if (newVenueGst.amount != null) return newVenueGst.amount;
+    if (newVenueGst.percent != null) return sheetSubtotal() * newVenueGst.percent / 100;
+    return 0;
+  }
+  function sheetScAmount() {
+    if (!newVenueSc) return 0;
+    if (newVenueSc.amount != null) return newVenueSc.amount;
+    if (newVenueSc.percent != null) return sheetSubtotal() * newVenueSc.percent / 100;
+    return 0;
+  }
+  function sheetTaxedTotal() {
+    return sheetSubtotal() + sheetGstAmount() + sheetScAmount();
+  }
+
+  async function handleSheetParse() {
+    const name = newVenueName.trim();
+    const hasPhoto = newVenuePhotos.length > 0 && !!name;
+    const validManual = newVenueManualItems.filter(i => i.name.trim());
+    if (!name) { setNewVenueError('Enter a venue name.'); return; }
+    if (!hasPhoto && !validManual.length) { setNewVenueError('Add a photo or at least one item.'); return; }
+    setNewVenueError('');
+    setNewVenueLoading(true);
+    try {
+      let parsedVenue = { items: [], gst: null, serviceCharge: null, receiptTotal: 0 };
+      if (hasPhoto) {
+        const cappedPhotos = await Promise.all(newVenuePhotos.map(f => capImageSize(f)));
+        const photos = await Promise.all(cappedPhotos.map(fileToBase64));
+        const apiUrl = import.meta.env.DEV ? 'http://localhost:3001/api/parse-receipt' : '/api/parse-receipt';
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 55000);
+        try {
+          const res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId, venues: [{ venueName: name, photos }] }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+          if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            throw new Error(d.error || `Server error: ${res.status}`);
+          }
+          const result = await res.json();
+          parsedVenue = result.venues?.[0] ?? parsedVenue;
+        } catch (err) {
+          clearTimeout(timeoutId);
+          if (err.name === 'AbortError') throw new Error('Request timed out — please try again');
+          throw err;
+        }
+      }
+      let items = (parsedVenue.items || []).map((item, idx) => ({
+        id: idx + 1,
+        name: item.name,
+        quantity: item.quantity ?? 1,
+        unitPrice: item.unitPrice ?? 0,
+      }));
+      if (validManual.length > 0) {
+        const offset = items.length;
+        items = [...items, ...validManual.map((i, idx) => ({
+          id: offset + idx + 1,
+          name: i.name.trim(),
+          quantity: Math.max(1, parseInt(i.qty) || 1),
+          unitPrice: parseFloat(i.price) || 0,
+        }))];
+      }
+      setNewVenueItems(items);
+      setNewVenueGst(parsedVenue.gst?.present ? parsedVenue.gst : null);
+      setNewVenueSc(parsedVenue.serviceCharge?.present ? parsedVenue.serviceCharge : null);
+      const rt = parsedVenue.receiptTotal ?? 0;
+      setNewVenueReceiptTotal(rt);
+      setNewVenueUserReceiptTotal(rt ? String(rt) : '');
+      setAddVenueStep('review');
+    } catch (err) {
+      setNewVenueError(err.message || 'Something went wrong.');
+      console.error(err);
+    }
+    setNewVenueLoading(false);
+  }
+
+  function handleSheetAddVenue() {
+    const name = newVenueName.trim();
+    if (!name || newVenueItems.length === 0) return;
+    const newVenue = {
+      name,
+      gst: newVenueGst,
+      serviceCharge: newVenueSc,
+      receiptTotal: newVenueReceiptTotal,
+      userReceiptTotal: newVenueUserReceiptTotal || String(newVenueReceiptTotal || ''),
+      items: newVenueItems.map((item, idx) => ({ ...item, id: Date.now() + idx })),
+    };
+    setVenues(prev => {
+      const transportIdx = prev.findIndex(v => v.name === 'Transport' || v.isTransport);
+      return transportIdx === -1 ? [...prev, newVenue] : [...prev.slice(0, transportIdx), newVenue, ...prev.slice(transportIdx)];
+    });
+    resetAddVenueSheet();
   }
 
   function venueSubtotal(venue) {
@@ -282,9 +462,11 @@ export default function ConfirmItems() {
         const vReceipt = parseFloat(venue.userReceiptTotal) || 0;
         const vDiff = Math.abs(vParsed - vReceipt);
         const vDiffOk = vDiff < 0.005;
-        const isVenueComplete = venue.items.length > 0 && venue.items.every(
+        const isParsedVenue = (venue.receiptTotal ?? 0) > 0;
+        const allItemsValid = venue.items.length > 0 && venue.items.every(
           item => item.name?.trim() && Number(item.quantity) > 0 && Number(item.unitPrice) > 0
         );
+        const isVenueComplete = allItemsValid && (!isParsedVenue || vDiffOk);
         return (
           <Fragment key={vi}>
             <div style={styles.venueBlock}>
@@ -335,7 +517,7 @@ export default function ConfirmItems() {
               </div>
             </div>
 
-            {venue.name !== 'Transport' && (
+            {venue.name !== 'Transport' && !venue.isTransport && isParsedVenue && (
               <div style={styles.compCard}>
                 <div style={styles.compRow}>
                   <span style={styles.compLabel}>Parsed total</span>
@@ -363,6 +545,10 @@ export default function ConfirmItems() {
           </Fragment>
         );
       })}
+
+      <button style={styles.addVenueBtn} onClick={() => setAddVenueOpen(true)}>
+        + Add venue
+      </button>
 
       {error && <p style={styles.error}>{error}</p>}
 
@@ -395,6 +581,201 @@ export default function ConfirmItems() {
           </div>
         );
       })()}
+      {/* Add venue bottom sheet */}
+      {addVenueOpen && (
+        <>
+          <div style={styles.sheetOverlay} onClick={resetAddVenueSheet} />
+          <div style={styles.addVenueSheet}>
+            <div style={styles.sheetDragHandle} />
+            <div style={styles.sheetTopRow}>
+              <div style={styles.sheetTitleText}>Add venue</div>
+              <button style={styles.sheetCloseBtn} onClick={resetAddVenueSheet}>×</button>
+            </div>
+
+            {addVenueStep === 'upload' ? (
+              <>
+                <input
+                  style={styles.sheetVenueNameInput}
+                  type="text"
+                  value={newVenueName}
+                  onChange={e => setNewVenueName(e.target.value)}
+                  placeholder="Venue name e.g. Jigger & Pony"
+                />
+                <p style={styles.photoHelper}>
+                  Multiple photos: ensure bottom of each overlaps with top of the next.
+                </p>
+                <div style={styles.photoRow}>
+                  {newVenuePhotos.map((file, pi) => (
+                    <div key={pi} style={styles.photoThumbWrapper}>
+                      <img src={URL.createObjectURL(file)} alt="" style={styles.photoThumb} />
+                      <button style={styles.removePhoto} onClick={() => setNewVenuePhotos(p => p.filter((_, i) => i !== pi))}>×</button>
+                    </div>
+                  ))}
+                  <div style={styles.addPhotoTile} onClick={() => sheetPhotoRef.current?.click()}>+</div>
+                  <input
+                    ref={sheetPhotoRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      const files = Array.from(e.target.files ?? []);
+                      setNewVenuePhotos(p => [...p, ...files]);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+
+                {newVenueManualItems.length > 0 && (
+                  <div style={styles.manualItemsList}>
+                    <div style={styles.manualItemsHeader}>
+                      <span style={styles.manualColName}>Item</span>
+                      <span style={styles.manualColQty}>Qty</span>
+                      <span style={styles.manualColPrice}>Price</span>
+                      <span style={{ width: '24px' }} />
+                    </div>
+                    {newVenueManualItems.map((item, i) => (
+                      <div key={i} style={styles.manualItemRow}>
+                        <input
+                          style={{ ...styles.manualInput, flex: 1 }}
+                          type="text"
+                          value={item.name}
+                          onChange={e => setNewVenueManualItems(p => p.map((it, j) => j === i ? { ...it, name: e.target.value } : it))}
+                          placeholder="Item name"
+                        />
+                        <input
+                          style={{ ...styles.manualInput, width: '44px' }}
+                          type="number"
+                          value={item.qty}
+                          min="1"
+                          onChange={e => setNewVenueManualItems(p => p.map((it, j) => j === i ? { ...it, qty: e.target.value } : it))}
+                        />
+                        <input
+                          style={{ ...styles.manualInput, width: '70px' }}
+                          type="number"
+                          value={item.price}
+                          step="0.01"
+                          min="0"
+                          onChange={e => setNewVenueManualItems(p => p.map((it, j) => j === i ? { ...it, price: e.target.value } : it))}
+                          placeholder="0.00"
+                        />
+                        <button style={styles.manualRemoveBtn} onClick={() => setNewVenueManualItems(p => p.filter((_, j) => j !== i))}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <button style={styles.manualAddBtn} onClick={() => setNewVenueManualItems(p => [...p, { name: '', qty: 1, price: '' }])}>
+                  + Add item manually
+                </button>
+
+                {newVenueError && <p style={{ ...styles.error, marginTop: '8px' }}>{newVenueError}</p>}
+
+                <div style={{ flex: 1 }} />
+                <button
+                  style={{ ...styles.btnPrimary, opacity: newVenueLoading ? 0.7 : 1, marginTop: '16px', flexShrink: 0 }}
+                  onClick={handleSheetParse}
+                  disabled={newVenueLoading}
+                >
+                  {newVenueLoading ? (
+                    <><span className="spinner" /> Reading your receipt...</>
+                  ) : newVenuePhotos.length > 0 ? 'Parse receipt →' : 'Continue →'}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={styles.venueBlock}>
+                  <div style={styles.venueHeader}>
+                    <span style={styles.venueHeaderText}>{newVenueName}</span>
+                    <span style={styles.venueEditHint}>Tap any item to edit</span>
+                  </div>
+
+                  {newVenueItems.map(item => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      isEditing={sheetEditingKey === String(item.id)}
+                      onToggleEdit={() => setSheetEditingKey(p => p === String(item.id) ? null : String(item.id))}
+                      onUpdate={(field, val) => setNewVenueItems(p => p.map(i => i.id === item.id ? { ...i, [field]: val } : i))}
+                      onEditChange={(f, v) => { sheetEditValuesRef.current = { ...sheetEditValuesRef.current, [f]: v }; }}
+                      onDelete={() => { setNewVenueItems(p => p.filter(i => i.id !== item.id)); setSheetEditingKey(null); }}
+                    />
+                  ))}
+
+                  <button style={styles.addItemLink} onClick={() => {
+                    const newId = Date.now();
+                    setNewVenueItems(p => [...p, { id: newId, name: '', quantity: 1, unitPrice: 0 }]);
+                    setSheetEditingKey(String(newId));
+                  }}>
+                    + Add item to {newVenueName}
+                  </button>
+
+                  <div style={styles.venueTotals}>
+                    <TotalRow label="Subtotal" value={sheetSubtotal()} />
+                    {newVenueGst != null && (
+                      <TotalRow
+                        label={newVenueGst.percent != null ? `GST (${newVenueGst.percent}%)` : 'GST'}
+                        value={sheetGstAmount()}
+                      />
+                    )}
+                    {newVenueSc != null && (
+                      <TotalRow
+                        label={newVenueSc.percent != null ? `Service charge (${newVenueSc.percent}%)` : 'Service charge'}
+                        value={sheetScAmount()}
+                      />
+                    )}
+                    <TotalRow label="Total" value={sheetTaxedTotal()} bold />
+                  </div>
+                </div>
+
+                {newVenueReceiptTotal > 0 && (() => {
+                  const sheetDiff = Math.abs(sheetTaxedTotal() - (parseFloat(newVenueUserReceiptTotal) || 0));
+                  const sheetDiffOk = sheetDiff < 0.005;
+                  return (
+                    <div style={{ ...styles.compCard, marginTop: '8px' }}>
+                      <div style={styles.compRow}>
+                        <span style={styles.compLabel}>Parsed total</span>
+                        <span style={styles.compValue}>${sheetTaxedTotal().toFixed(2)}</span>
+                      </div>
+                      <div style={styles.compRow}>
+                        <span style={styles.compLabel}>Receipt total</span>
+                        <input
+                          style={styles.receiptInput}
+                          type="number"
+                          step="0.01"
+                          value={newVenueUserReceiptTotal}
+                          onChange={e => setNewVenueUserReceiptTotal(e.target.value)}
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div style={styles.compRow}>
+                        <span style={styles.compLabel}>Difference</span>
+                        <span style={{ ...styles.compDiff, color: sheetDiffOk ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                          {sheetDiffOk ? '✓' : '✗'} ${sheetDiff.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div style={{ flex: 1 }} />
+                <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexShrink: 0 }}>
+                  <button style={{ ...styles.btnSecondary, flex: 1 }} onClick={() => setAddVenueStep('upload')}>
+                    Re-parse
+                  </button>
+                  <button
+                    style={{ ...styles.btnPrimary, flex: 1, opacity: newVenueItems.length === 0 ? 0.5 : 1 }}
+                    onClick={handleSheetAddVenue}
+                    disabled={newVenueItems.length === 0}
+                  >
+                    Add to session
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
     </PageContainer>
   );
 }
@@ -767,4 +1148,51 @@ const styles = {
     borderRadius: '8px',
     cursor: 'pointer',
   },
+  addVenueBtn: {
+    width: '100%',
+    padding: '11px 14px',
+    backgroundColor: 'transparent',
+    border: '0.5px dashed var(--border-color)',
+    borderRadius: '10px',
+    fontSize: '13px',
+    color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    cursor: 'pointer',
+    marginTop: '4px',
+    marginBottom: '4px',
+    textAlign: 'center',
+  },
+  sheetOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 200 },
+  addVenueSheet: {
+    position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 201,
+    backgroundColor: 'var(--bg-primary)', borderRadius: '20px 20px 0 0',
+    height: '95vh', overflowY: 'auto', padding: '12px 16px 32px',
+    display: 'flex', flexDirection: 'column',
+  },
+  sheetDragHandle: { width: '36px', height: '4px', borderRadius: '2px', backgroundColor: 'var(--border-color)', margin: '0 auto 16px', flexShrink: 0 },
+  sheetTopRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexShrink: 0 },
+  sheetTitleText: { fontSize: '17px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  sheetCloseBtn: { background: 'none', border: 'none', fontSize: '22px', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px', lineHeight: 1 },
+  sheetVenueNameInput: {
+    width: '100%', border: '0.5px solid var(--border-color)', borderRadius: '8px',
+    padding: '10px 12px', fontSize: '15px', backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif',
+    outline: 'none', marginBottom: '10px', colorScheme: 'light dark', flexShrink: 0,
+    boxSizing: 'border-box',
+  },
+  photoHelper: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '10px', flexShrink: 0 },
+  photoRow: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px', flexShrink: 0 },
+  photoThumbWrapper: { position: 'relative' },
+  photoThumb: { width: '72px', height: '72px', borderRadius: '8px', objectFit: 'cover', display: 'block' },
+  removePhoto: { position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', border: 'none', cursor: 'pointer', fontSize: '13px', lineHeight: '20px', textAlign: 'center', padding: 0 },
+  addPhotoTile: { width: '72px', height: '72px', borderRadius: '8px', border: '1.5px dashed var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-secondary)', fontSize: '24px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none' },
+  manualAddBtn: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', border: '0.5px dashed var(--border-color)', borderRadius: '6px', padding: '7px 12px', cursor: 'pointer', marginTop: '8px', width: '100%', textAlign: 'center', flexShrink: 0 },
+  manualItemsList: { marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 },
+  manualItemsHeader: { display: 'flex', gap: '6px', alignItems: 'center', padding: '0 2px' },
+  manualColName: { flex: 1, fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase' },
+  manualColQty: { width: '44px', fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase', flexShrink: 0 },
+  manualColPrice: { width: '70px', fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase', flexShrink: 0 },
+  manualItemRow: { display: 'flex', gap: '6px', alignItems: 'center' },
+  manualInput: { padding: '7px 8px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', colorScheme: 'light dark' },
+  manualRemoveBtn: { width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', cursor: 'pointer', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, padding: 0 },
 };

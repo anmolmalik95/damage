@@ -350,11 +350,6 @@ export default function UploadReceipts() {
         ))}
       </div>
 
-      <div style={styles.addButtonRow}>
-        <button style={styles.addRowBtn} onClick={addVenue}>+ Add venue</button>
-        <button style={styles.addRowBtn} onClick={addCab}>+ Add cab</button>
-      </div>
-
       {cabs.length > 0 && (
         <div style={styles.cabsBlock}>
           <div style={styles.cabsHeader}>Cabs / Transport</div>
@@ -388,6 +383,11 @@ export default function UploadReceipts() {
           ))}
         </div>
       )}
+
+      <div style={styles.addButtonRow}>
+        <button style={styles.addRowBtn} onClick={addVenue}>+ Add venue</button>
+        <button style={styles.addRowBtn} onClick={addCab}>+ Add cab</button>
+      </div>
 
       {error && <p style={styles.error}>{error}</p>}
 
