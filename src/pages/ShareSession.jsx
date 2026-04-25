@@ -18,10 +18,22 @@ export default function ShareSession() {
 
   const [session, setSession] = useState(null);
   const [sessionTotal, setSessionTotal] = useState(() => location.state?.total ?? 0);
-  const [billPayer, setBillPayer] = useState(currentMemberId);
+
+  // Who paid state — starts null (no autofill)
+  const [billPayer, setBillPayer] = useState(null);
   const [multiPayer, setMultiPayer] = useState(false);
+
+  // Per-venue payers (non-transport)
   const [venues, setVenues] = useState([]);
   const [venuePayers, setVenuePayers] = useState({});
+
+  // Transport
+  const [transportVenueId, setTransportVenueId] = useState(null);
+  const [transportItems, setTransportItems] = useState([]);
+  const [allCabPayer, setAllCabPayer] = useState(null);
+  const [cabPayers, setCabPayers] = useState({});
+  const [cabsExpanded, setCabsExpanded] = useState(false);
+
   const [newName, setNewName] = useState('');
   const [members, setMembers] = useState(() => {
     try {
@@ -47,7 +59,7 @@ export default function ShareSession() {
       if (!snap.exists()) return;
       const data = snap.data();
       setSession(data);
-      if (data.billPayer) setBillPayer(data.billPayer);
+      if (data.multiPayer) setMultiPayer(true);
       if (data.paymentInstructions != null) setPaymentInstructions(data.paymentInstructions);
 
       if (!location.state?.total) {
@@ -56,11 +68,10 @@ export default function ShareSession() {
         for (const vDoc of vSnap.docs) {
           const vData = vDoc.data();
           const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'));
-          const itemsTotal = iSnap.docs.reduce((s, d) => {
+          total += iSnap.docs.reduce((s, d) => {
             const item = d.data();
             return s + (item.unitPrice ?? 0) * (item.quantity ?? 1);
-          }, 0);
-          total += itemsTotal + (vData.gstAmount || 0) + (vData.serviceChargeAmount || 0);
+          }, 0) + (vData.gstAmount || 0) + (vData.serviceChargeAmount || 0);
         }
         setSessionTotal(total);
       }
@@ -71,11 +82,32 @@ export default function ShareSession() {
   useEffect(() => {
     async function loadVenues() {
       const vSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
-      const list = vSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setVenues(list);
+      const allVenues = vSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const nonTransport = allVenues.filter(v => v.name !== 'Transport' && !v.isTransport);
+      const transport = allVenues.find(v => v.name === 'Transport' || v.isTransport);
+
+      const sorted = [...nonTransport].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      setVenues(sorted);
+
       const initial = {};
-      list.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
+      sorted.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
       setVenuePayers(initial);
+
+      if (transport) {
+        setTransportVenueId(transport.id);
+        const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', transport.id, 'items'));
+        const items = iSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setTransportItems(items);
+        // Pre-fill per-cab payers if already set
+        const cabInitial = {};
+        items.forEach(item => { if (item.billPayer) cabInitial[item.id] = item.billPayer; });
+        if (Object.keys(cabInitial).length > 0) {
+          setCabPayers(cabInitial);
+        }
+        // Pre-fill allCabPayer if all cabs have same payer
+        const uniquePayers = [...new Set(Object.values(cabInitial))];
+        if (uniquePayers.length === 1) setAllCabPayer(uniquePayers[0]);
+      }
     }
     loadVenues();
   }, [sessionId]);
@@ -135,30 +167,39 @@ export default function ShareSession() {
     });
   }
 
-  async function handleSetBillPayer(memberId) {
-    setBillPayer(memberId);
-    try {
-      await updateDoc(doc(db, 'sessions', sessionId), { billPayer: memberId });
-    } catch (err) { console.error(err); }
-  }
-
-  function handleSetVenuePayer(venueId, memberId) {
-    setVenuePayers(prev => ({ ...prev, [venueId]: memberId }));
-  }
-
   async function handleOpen() {
     setError('');
     setOpening(true);
     try {
       if (multiPayer) {
         await updateDoc(doc(db, 'sessions', sessionId), { status: 'open', multiPayer: true });
+        // Write per-venue payers
         await Promise.all(
           venues
             .filter(v => venuePayers[v.id])
             .map(v => updateDoc(doc(db, 'sessions', sessionId, 'venues', v.id), { billPayer: venuePayers[v.id] }))
         );
+        // Write per-cab payers
+        if (transportVenueId && transportItems.length > 0) {
+          if (cabsExpanded) {
+            await Promise.all(
+              transportItems
+                .filter(item => cabPayers[item.id])
+                .map(item => updateDoc(doc(db, 'sessions', sessionId, 'venues', transportVenueId, 'items', item.id), { billPayer: cabPayers[item.id] }))
+            );
+          } else if (allCabPayer) {
+            await Promise.all(
+              transportItems.map(item =>
+                updateDoc(doc(db, 'sessions', sessionId, 'venues', transportVenueId, 'items', item.id), { billPayer: allCabPayer })
+              )
+            );
+          }
+        }
       } else {
+        // Single payer: write to session AND all venues
         await updateDoc(doc(db, 'sessions', sessionId), { status: 'open', billPayer, multiPayer: false });
+        const allVenueSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
+        await Promise.all(allVenueSnap.docs.map(d => updateDoc(d.ref, { billPayer })));
       }
       sessionStorage.removeItem(membersDraftKey(sessionId));
       sessionStorage.removeItem(`draft_confirm_${sessionId}`);
@@ -176,8 +217,11 @@ export default function ShareSession() {
     ...members,
   ];
 
+  const transportCovered = transportItems.length === 0 ||
+    (cabsExpanded ? transportItems.every(item => !!cabPayers[item.id]) : !!allCabPayer);
+
   const canOpen = multiPayer
-    ? venues.length > 0 && venues.every(v => !!venuePayers[v.id])
+    ? venues.every(v => !!venuePayers[v.id]) && transportCovered
     : !!billPayer;
 
   return (
@@ -238,53 +282,106 @@ export default function ShareSession() {
       {/* Who paid */}
       <div style={styles.billPayerSection}>
         <div style={styles.billPayerTitle}>Who paid the bill?</div>
-        <div style={styles.billPayerSubtitle}>Select the person who fronted the money.</div>
-
-        {/* Multi-payer toggle */}
-        <button
-          style={{ ...styles.toggleBtn, ...(multiPayer ? styles.toggleBtnActive : {}) }}
-          onClick={() => setMultiPayer(p => !p)}
-        >
-          {multiPayer ? '✓ Multiple bill payers (per venue)' : 'Multiple bill payers (per venue)'}
-        </button>
 
         {!multiPayer ? (
-          <div style={styles.chipRow}>
-            {allChipMembers.map(m => {
-              const sel = billPayer === m.id;
-              return (
-                <button
-                  key={m.id}
-                  style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
-                  onClick={() => handleSetBillPayer(m.id)}
-                >
-                  {m.name}
-                </button>
-              );
-            })}
-          </div>
+          <>
+            <div style={styles.chipRow}>
+              {allChipMembers.map(m => {
+                const sel = billPayer === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
+                    onClick={() => setBillPayer(m.id)}
+                  >
+                    {m.name}
+                  </button>
+                );
+              })}
+            </div>
+            <button style={styles.multiPayerLink} onClick={() => setMultiPayer(true)}>
+              Multiple people paid for different things ›
+            </button>
+          </>
         ) : (
-          <div style={styles.venuePayersSection}>
-            {venues.map(venue => (
-              <div key={venue.id} style={styles.venuePayerBlock}>
-                <div style={styles.venuePayerLabel}>{venue.name}</div>
-                <div style={styles.chipRow}>
-                  {allChipMembers.map(m => {
-                    const sel = venuePayers[venue.id] === m.id;
-                    return (
-                      <button
-                        key={m.id}
-                        style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
-                        onClick={() => handleSetVenuePayer(venue.id, m.id)}
-                      >
-                        {m.name}
-                      </button>
-                    );
-                  })}
+          <>
+            <button style={styles.multiPayerLink} onClick={() => { setMultiPayer(false); setVenuePayers({}); setCabPayers({}); setCabsExpanded(false); setAllCabPayer(null); }}>
+              ← Single payer
+            </button>
+            <div style={styles.venuePayersSection}>
+              {venues.map(venue => (
+                <div key={venue.id} style={styles.venuePayerBlock}>
+                  <div style={styles.venuePayerLabel}>{venue.name}</div>
+                  <div style={styles.chipRow}>
+                    {allChipMembers.map(m => {
+                      const sel = venuePayers[venue.id] === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
+                          onClick={() => setVenuePayers(p => ({ ...p, [venue.id]: m.id }))}
+                        >
+                          {m.name}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+
+              {transportItems.length > 0 && (
+                <div style={styles.venuePayerBlock}>
+                  <div style={styles.venuePayerLabel}>Transport</div>
+                  {!cabsExpanded ? (
+                    <>
+                      <div style={styles.chipRow}>
+                        {allChipMembers.map(m => {
+                          const sel = allCabPayer === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
+                              onClick={() => setAllCabPayer(m.id)}
+                            >
+                              {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button style={styles.expandCabsLink} onClick={() => setCabsExpanded(true)}>
+                        Different people paid for different cabs ›
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {transportItems.map(item => (
+                        <div key={item.id} style={{ marginBottom: '12px' }}>
+                          <div style={styles.cabItemLabel}>{item.name}</div>
+                          <div style={styles.chipRow}>
+                            {allChipMembers.map(m => {
+                              const sel = cabPayers[item.id] === m.id;
+                              return (
+                                <button
+                                  key={m.id}
+                                  style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
+                                  onClick={() => setCabPayers(p => ({ ...p, [item.id]: m.id }))}
+                                >
+                                  {m.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      <button style={styles.expandCabsLink} onClick={() => { setCabsExpanded(false); setCabPayers({}); }}>
+                        ← All cabs same payer
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 
@@ -346,16 +443,16 @@ const styles = {
   memberName: { fontSize: '14px', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   removeBtn: { background: 'none', border: 'none', fontSize: '13px', color: 'var(--text-secondary)', cursor: 'pointer', padding: '4px' },
   billPayerSection: { marginTop: '20px', marginBottom: '8px' },
-  billPayerTitle: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '4px' },
-  billPayerSubtitle: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' },
-  toggleBtn: { padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', cursor: 'pointer', marginBottom: '12px' },
-  toggleBtnActive: { backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '0.5px solid var(--text-primary)', fontWeight: 500 },
+  billPayerTitle: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' },
+  multiPayerLink: { background: 'none', border: 'none', padding: '0', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', textDecoration: 'underline', marginTop: '10px', display: 'block' },
   chipRow: { display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' },
   chip: { padding: '8px 16px', borderRadius: '20px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 },
   chipSel: { backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', border: '0.5px solid var(--text-primary)' },
-  venuePayersSection: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  venuePayersSection: { display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' },
   venuePayerBlock: {},
   venuePayerLabel: { fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' },
+  expandCabsLink: { background: 'none', border: 'none', padding: '0', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', textDecoration: 'underline', marginTop: '8px', display: 'block' },
+  cabItemLabel: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '6px' },
   openButtonWrap: { marginTop: '20px' },
   tipText: { textAlign: 'center', marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   error: { fontSize: '12px', color: 'var(--color-danger)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '8px' },

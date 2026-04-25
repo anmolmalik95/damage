@@ -454,9 +454,9 @@ export default function ClaimItems() {
 
       {/* Venue blocks */}
       {[...venues].sort((a, b) => {
-        if (a.name === 'Transport' || a.isTransport) return 1;
-        if (b.name === 'Transport' || b.isTransport) return -1;
-        return 0;
+        const ao = a.order ?? (a.name === 'Transport' || a.isTransport ? 9999 : 0);
+        const bo = b.order ?? (b.name === 'Transport' || b.isTransport ? 9999 : 0);
+        return ao - bo;
       }).map(venue => {
         const isVenueFullyClaimed = venue.items.length > 0 && venue.items.every(
           item => claimsFor(item.id).length >= (item.quantity ?? 1)
@@ -464,7 +464,7 @@ export default function ClaimItems() {
         return (
         <div key={venue.id} style={s.venueBlock}>
           <div style={s.venueHeader}>
-            <span style={isVenueFullyClaimed ? { color: '#27500A' } : {}}>{venue.name}</span>
+            <span>{venue.name}</span>
             {isVenueFullyClaimed && (
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="7" fill="#EAF3DE"/>

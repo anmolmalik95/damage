@@ -34,16 +34,9 @@ export default function WhoAreYou() {
       const data = snap.data();
       setSession(data);
 
-      // Closed: always go straight to breakdown, no identity needed
-      if (data.status === 'closed') {
-        navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
-        return;
-      }
-
       const existingId = localStorage.getItem(`member_${sessionId}`);
       if (existingId) {
-        // Locked: go to breakdown (read-only), not claim
-        if (data.status === 'locked') {
+        if (data.status === 'locked' || data.status === 'closed') {
           navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
         } else {
           navigateForward(`/session/${sessionId}/claim`, { replace: true });
@@ -100,8 +93,7 @@ export default function WhoAreYou() {
     localStorage.setItem(`member_${sessionId}`, member.id);
     localStorage.setItem(`memberName_${sessionId}`, member.name);
 
-    // Locked session: go straight to read-only breakdown
-    if (session?.status === 'locked') {
+    if (session?.status === 'locked' || session?.status === 'closed' || location.state?.returnTo === 'breakdown') {
       navigateForward(`/session/${sessionId}/breakdown`);
       return;
     }
@@ -204,7 +196,7 @@ export default function WhoAreYou() {
               {adding ? '…' : 'Add'}
             </button>
           </div>
-        ) : (
+        ) : session?.status !== 'locked' && session?.status !== 'closed' ? (
           <div
             style={styles.newPersonRow}
             onClick={() => { setShowNewInput(true); setSelectedId(null); }}
@@ -212,7 +204,7 @@ export default function WhoAreYou() {
             <div style={styles.avatarDashed}>+</div>
             <div style={{ ...styles.memberName, color: 'var(--text-secondary)' }}>+ Add myself</div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {selectedId && (

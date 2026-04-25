@@ -37,10 +37,18 @@ export default function Breakdown() {
   const [editingInstructions, setEditingInstructions] = useState(false);
   const [instrSheetOpen, setInstrSheetOpen] = useState(false);
   const [instrSheetDraft, setInstrSheetDraft] = useState('');
+  const [billPayersSheetOpen, setBillPayersSheetOpen] = useState(false);
+  const [venueBillPayers, setVenueBillPayers] = useState({});
 
   useEffect(() => {
     document.title = session?.name ? `Breakdown · ${session.name} — Unfuck` : 'Unfuck';
   }, [session?.name]);
+
+  useEffect(() => {
+    if (!currentMemberId) {
+      navigate(`/s/${sessionId}`, { replace: true, state: { returnTo: 'breakdown' } });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleCard(memberId) {
     setExpandedCards(p => { const n = new Set(p); n.has(memberId) ? n.delete(memberId) : n.add(memberId); return n; });
@@ -84,6 +92,9 @@ export default function Breakdown() {
         })
       );
       setVenues(venueList);
+      const initial = {};
+      venueList.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
+      setVenueBillPayers(initial);
       loadStateRef.current.venues = true;
       checkLoaded();
     });
@@ -186,6 +197,13 @@ export default function Breakdown() {
     setSaving(false);
   }
 
+  async function handleSetVenueBillPayer(venueId, memberId) {
+    setVenueBillPayers(prev => ({ ...prev, [venueId]: memberId }));
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId, 'venues', venueId), { billPayer: memberId });
+    } catch (err) { console.error(err); }
+  }
+
   async function handleRenameSave() {
     const name = renameValue.trim();
     if (!name) return;
@@ -286,11 +304,9 @@ export default function Breakdown() {
 
   const memberIndex = Object.fromEntries(members.map((m, i) => [m.id, i]));
   const sortedVenueDataMap = [...venueDataMap].sort((a, b) => {
-    const aT = a.venue.isTransport || a.venue.name === 'Transport';
-    const bT = b.venue.isTransport || b.venue.name === 'Transport';
-    if (aT) return 1;
-    if (bT) return -1;
-    return 0;
+    const ao = a.venue.order ?? (a.venue.isTransport || a.venue.name === 'Transport' ? 9999 : 0);
+    const bo = b.venue.order ?? (b.venue.isTransport || b.venue.name === 'Transport' ? 9999 : 0);
+    return ao - bo;
   });
 
   return (
@@ -614,6 +630,7 @@ export default function Breakdown() {
           ] : []),
           ...((isAdmin || isBillPayer) ? [
             { icon: '💬', label: 'Edit payment instructions', action: () => { setMenuOpen(false); setInstrSheetDraft(paymentInstructions); setInstrSheetOpen(true); } },
+            { icon: '🏦', label: 'Manage bill payers', action: () => { setMenuOpen(false); setBillPayersSheetOpen(true); } },
           ] : []),
         ];
         return (
@@ -657,6 +674,47 @@ export default function Breakdown() {
               <button style={s.cancelBtn} onClick={() => setInstrSheetOpen(false)}>Cancel</button>
               <button style={s.saveBtn} onClick={handleSaveInstrSheet}>Save</button>
             </div>
+          </div>
+        </>
+      )}
+
+      {/* Manage bill payers sheet */}
+      {billPayersSheetOpen && (
+        <>
+          <div style={s.sheetBackdrop} onClick={() => setBillPayersSheetOpen(false)} />
+          <div style={s.menuSheet}>
+            <div style={s.sheetHandle} />
+            <div style={s.renameTitle}>Manage bill payers</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px' }}>
+              Set who paid for each venue.
+            </div>
+            {venues.map(venue => (
+              <div key={venue.id} style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                  {venue.name}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {members.map(m => {
+                    const sel = venueBillPayers[venue.id] === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: sel ? 'var(--text-primary)' : 'var(--bg-secondary)', color: sel ? 'var(--bg-primary)' : 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        onClick={() => handleSetVenueBillPayer(venue.id, m.id)}
+                      >
+                        {m.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <button
+              style={{ ...s.saveBtn, width: '100%', padding: '12px' }}
+              onClick={() => setBillPayersSheetOpen(false)}
+            >
+              Done
+            </button>
           </div>
         </>
       )}

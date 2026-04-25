@@ -21,8 +21,9 @@ export default function ReceiptsScreen() {
       ]);
       if (sessionSnap.exists()) setSessionName(sessionSnap.data().name ?? '');
       const venueList = venuesSnap.docs
-        .map(d => ({ id: d.id, name: d.data().name ?? '', photoUrls: d.data().photoUrls ?? [] }))
-        .filter(v => v.photoUrls.length > 0);
+        .map(d => ({ id: d.id, name: d.data().name ?? '', photoUrls: d.data().photoUrls ?? [], order: d.data().order ?? 0 }))
+        .filter(v => v.photoUrls.length > 0)
+        .sort((a, b) => a.order - b.order);
       setVenues(venueList);
       setLoading(false);
     }

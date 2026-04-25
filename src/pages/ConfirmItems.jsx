@@ -222,7 +222,8 @@ export default function ConfirmItems() {
       // Write fresh data
       const total = venues.reduce((s, v) => s + venueTaxedTotal(v), 0);
       await Promise.all(
-        venues.map(async venue => {
+        venues.map(async (venue, vi) => {
+          const isTransport = venue.name === 'Transport' || venue.isTransport;
           const venueRef = await addDoc(collection(db, 'sessions', sessionId, 'venues'), {
             name: venue.name,
             gstPercent: venue.gst?.percent ?? null,
@@ -231,17 +232,18 @@ export default function ConfirmItems() {
             serviceChargeAmount: venueScAmount(venue),
             receiptTotal: parseFloat(venue.userReceiptTotal) || venueTaxedTotal(venue),
             photoUrls: photoUrlsByVenue[venue.name] ?? [],
+            order: isTransport ? 9999 : vi,
             createdAt: serverTimestamp(),
           });
 
           await Promise.all(
-            venue.items.map(item =>
+            venue.items.map((item, ii) =>
               addDoc(collection(db, 'sessions', sessionId, 'venues', venueRef.id, 'items'), {
                 name: item.name,
                 quantity: Number(item.quantity),
                 unitPrice: Number(item.unitPrice),
                 totalPrice: Number(item.quantity) * Number(item.unitPrice),
-                ...(item.paidByName ? { paidByName: item.paidByName } : {}),
+                order: ii,
               })
             )
           );
@@ -280,11 +282,22 @@ export default function ConfirmItems() {
         const vReceipt = parseFloat(venue.userReceiptTotal) || 0;
         const vDiff = Math.abs(vParsed - vReceipt);
         const vDiffOk = vDiff < 0.005;
+        const isVenueComplete = venue.items.length > 0 && venue.items.every(
+          item => item.name?.trim() && Number(item.quantity) > 0 && Number(item.unitPrice) > 0
+        );
         return (
           <Fragment key={vi}>
             <div style={styles.venueBlock}>
               <div style={styles.venueHeader}>
-                <span style={styles.venueHeaderText}>{venue.name}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={styles.venueHeaderText}>{venue.name}</span>
+                  {isVenueComplete && (
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="7" fill="#EAF3DE"/>
+                      <path d="M5 8L7 10L11 6" stroke="#27500A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                </div>
                 <span style={styles.venueEditHint}>Tap any item to edit</span>
               </div>
 
@@ -353,18 +366,35 @@ export default function ConfirmItems() {
 
       {error && <p style={styles.error}>{error}</p>}
 
-      <div style={styles.bottomButtons}>
-        <button style={styles.btnSecondary} onClick={() => navigate(-1)}>
-          Retake photos
-        </button>
-        <button
-          style={{ ...styles.btnPrimary, opacity: loading ? 0.6 : 1 }}
-          onClick={handleConfirm}
-          disabled={loading}
-        >
-          {loading ? 'Saving...' : 'Looks right — continue'}
-        </button>
-      </div>
+      {(() => {
+        const hasSignificantDiff = venues.some(v => {
+          if (v.name === 'Transport' || v.isTransport) return false;
+          const vReceipt = parseFloat(v.userReceiptTotal) || 0;
+          if (!vReceipt) return false;
+          return Math.abs(venueTaxedTotal(v) - vReceipt) >= 0.005;
+        });
+        return (
+          <div style={styles.bottomButtons}>
+            <button style={styles.btnSecondary} onClick={() => navigate(-1)}>
+              Retake photos
+            </button>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <button
+                style={{ ...styles.btnPrimary, opacity: (loading || hasSignificantDiff) ? 0.6 : 1 }}
+                onClick={handleConfirm}
+                disabled={loading || hasSignificantDiff}
+              >
+                {loading ? 'Saving...' : 'Looks right — continue'}
+              </button>
+              {hasSignificantDiff && !loading && (
+                <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                  Fix any issues above to continue
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </PageContainer>
   );
 }

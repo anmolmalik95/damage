@@ -84,6 +84,14 @@ export default function UploadReceipts() {
     });
   }
 
+  function deleteVenue(index) {
+    setVenues(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      saveVenuesDraft(updated);
+      return updated;
+    });
+  }
+
   function addManualItem(venueIndex) {
     setVenues(prev => {
       const updated = prev.map((v, i) => i === venueIndex
@@ -125,7 +133,7 @@ export default function UploadReceipts() {
   }
 
   function addCab() {
-    setCabs(prev => [...prev, { id: `cab_${Date.now()}`, from: '', to: '', price: '', paidByName: '' }]);
+    setCabs(prev => [...prev, { id: `cab_${Date.now()}`, from: '', to: '', price: '' }]);
   }
 
   function updateCab(id, field, value) {
@@ -167,7 +175,6 @@ export default function UploadReceipts() {
     try {
       const venuesWithPhotos = venues.filter(v => v.name.trim() && v.photos.length > 0);
 
-      // Cap image sizes before any upload or API call
       const cappedVenues = await Promise.all(
         venuesWithPhotos.map(async venue => ({
           ...venue,
@@ -175,7 +182,6 @@ export default function UploadReceipts() {
         }))
       );
 
-      // API parse
       const apiPromise = hasPhoto
         ? (async () => {
             const venuePayloads = await Promise.all(
@@ -248,7 +254,6 @@ export default function UploadReceipts() {
           name: cabName(c),
           quantity: 1,
           unitPrice: parseFloat(c.price) || 0,
-          ...(c.paidByName.trim() ? { paidByName: c.paidByName.trim() } : {}),
         }));
         const existing = parsed.venues?.find(v => (v.venueName || v.name) === 'Transport');
         if (existing) {
@@ -264,7 +269,7 @@ export default function UploadReceipts() {
         state: { parsed, venueNames: venues.map(v => v.name.trim()) },
       });
 
-      // Background storage upload — non-blocking, does not affect user flow
+      // Background storage upload — non-blocking
       if (cappedVenues.length > 0) {
         (async () => {
           try {
@@ -278,7 +283,6 @@ export default function UploadReceipts() {
                     return getDownloadURL(fileRef);
                   })
                 );
-                // Save URLs to Firestore venue doc if it exists
                 const venuesSnap = await getDocs(
                   query(collection(db, 'sessions', sessionId, 'venues'), where('name', '==', venue.name.trim()))
                 );
@@ -333,68 +337,57 @@ export default function UploadReceipts() {
           <VenueBlock
             key={vi}
             venue={venue}
+            venueIndex={vi}
+            totalVenues={venues.length}
             onNameChange={val => updateVenueName(vi, val)}
             onAddPhoto={file => addPhoto(vi, file)}
             onRemovePhoto={pi => removePhoto(vi, pi)}
             onAddManual={() => addManualItem(vi)}
             onUpdateManual={(ii, field, val) => updateManualItem(vi, ii, field, val)}
             onRemoveManual={ii => removeManualItem(vi, ii)}
+            onDelete={() => deleteVenue(vi)}
           />
         ))}
       </div>
 
-      <div style={styles.venueFooter}>
-        <span style={styles.venueCount}>{venues.length} {venues.length === 1 ? 'venue' : 'venues'}</span>
-        <button style={styles.addVenueBtn} onClick={addVenue}>+ Add venue</button>
+      <div style={styles.addButtonRow}>
+        <button style={styles.addRowBtn} onClick={addVenue}>+ Add venue</button>
+        <button style={styles.addRowBtn} onClick={addCab}>+ Add cab</button>
       </div>
 
-      {/* Cabs */}
       {cabs.length > 0 && (
         <div style={styles.cabsBlock}>
           <div style={styles.cabsHeader}>Cabs / Transport</div>
           {cabs.map(cab => (
-            <div key={cab.id} style={{ marginBottom: '8px' }}>
-              <div style={styles.cabRow}>
-                <input
-                  style={{ ...styles.cabInput, flex: 1 }}
-                  type="text"
-                  value={cab.from}
-                  onChange={e => updateCab(cab.id, 'from', e.target.value)}
-                  placeholder="From"
-                />
-                <input
-                  style={{ ...styles.cabInput, flex: 1 }}
-                  type="text"
-                  value={cab.to}
-                  onChange={e => updateCab(cab.id, 'to', e.target.value)}
-                  placeholder="To"
-                />
-                <input
-                  style={{ ...styles.cabInput, width: '72px' }}
-                  type="number"
-                  value={cab.price}
-                  step="0.01"
-                  min="0"
-                  onChange={e => updateCab(cab.id, 'price', e.target.value)}
-                  placeholder="$0.00"
-                />
-                <button style={styles.cabRemoveBtn} onClick={() => removeCab(cab.id)}>×</button>
-              </div>
-              <div style={styles.cabPayerRow}>
-                <span style={styles.cabPayerLabel}>Paid by</span>
-                <input
-                  style={styles.cabPayerInput}
-                  type="text"
-                  value={cab.paidByName}
-                  onChange={e => updateCab(cab.id, 'paidByName', e.target.value)}
-                  placeholder={session?.creatorName ?? 'Name'}
-                />
-              </div>
+            <div key={cab.id} style={styles.cabRow}>
+              <input
+                style={{ ...styles.cabInput, flex: 1 }}
+                type="text"
+                value={cab.from}
+                onChange={e => updateCab(cab.id, 'from', e.target.value)}
+                placeholder="From"
+              />
+              <input
+                style={{ ...styles.cabInput, flex: 1 }}
+                type="text"
+                value={cab.to}
+                onChange={e => updateCab(cab.id, 'to', e.target.value)}
+                placeholder="To"
+              />
+              <input
+                style={{ ...styles.cabInput, width: '72px' }}
+                type="number"
+                value={cab.price}
+                step="0.01"
+                min="0"
+                onChange={e => updateCab(cab.id, 'price', e.target.value)}
+                placeholder="$0.00"
+              />
+              <button style={styles.cabRemoveBtn} onClick={() => removeCab(cab.id)}>×</button>
             </div>
           ))}
         </div>
       )}
-      <button style={styles.addCabBtn} onClick={addCab}>+ Add cab</button>
 
       {error && <p style={styles.error}>{error}</p>}
 
@@ -407,11 +400,17 @@ export default function UploadReceipts() {
   );
 }
 
-function VenueBlock({ venue, onNameChange, onAddPhoto, onRemovePhoto, onAddManual, onUpdateManual, onRemoveManual }) {
+function VenueBlock({ venue, venueIndex, totalVenues, onNameChange, onAddPhoto, onRemovePhoto, onAddManual, onUpdateManual, onRemoveManual, onDelete }) {
   const inputRef = useRef(null);
 
   return (
     <div style={styles.venueBlock}>
+      {totalVenues > 1 && (
+        <div style={styles.venueBlockHeader}>
+          <span style={styles.venueBlockNum}>Venue {venueIndex + 1}</span>
+          <button style={styles.removeVenueBtn} onClick={onDelete}>✕ Remove venue</button>
+        </div>
+      )}
       <input
         style={styles.venueNameInput}
         type="text"
@@ -535,6 +534,29 @@ const styles = {
     backgroundColor: 'var(--bg-secondary)',
     borderRadius: '12px',
     padding: '16px',
+  },
+  venueBlockHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '10px',
+  },
+  venueBlockNum: {
+    fontSize: '11px',
+    fontWeight: 600,
+    color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  removeVenueBtn: {
+    background: 'none',
+    border: 'none',
+    fontSize: '12px',
+    color: 'var(--color-danger)',
+    cursor: 'pointer',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    padding: '0',
   },
   venueNameInput: {
     width: '100%',
@@ -693,27 +715,23 @@ const styles = {
     flexShrink: 0,
     padding: 0,
   },
-  venueFooter: {
+  addButtonRow: {
     display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: '8px',
     padding: '12px 0',
   },
-  venueCount: {
-    fontSize: '13px',
-    color: 'var(--text-secondary)',
-    fontFamily: 'system-ui, -apple-system, sans-serif',
-  },
-  addVenueBtn: {
-    fontSize: '13px',
+  addRowBtn: {
+    flex: 1,
+    fontSize: '14px',
     fontWeight: 500,
     fontFamily: 'system-ui, -apple-system, sans-serif',
     color: 'var(--text-primary)',
     backgroundColor: 'transparent',
-    border: '1px solid var(--text-secondary)',
+    border: '1px solid var(--border-color)',
     borderRadius: '8px',
-    padding: '8px 16px',
+    padding: '11px',
     cursor: 'pointer',
+    textAlign: 'center',
   },
   error: {
     fontSize: '12px',
@@ -784,24 +802,6 @@ const styles = {
     justifyContent: 'center',
     flexShrink: 0,
     padding: 0,
-  },
-  cabPayerRow: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' },
-  cabPayerLabel: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0, minWidth: '44px' },
-  cabPayerInput: { padding: '5px 8px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', colorScheme: 'light dark', flex: 1 },
-  addCabBtn: {
-    fontSize: '14px',
-    fontWeight: 500,
-    color: 'var(--text-primary)',
-    fontFamily: 'system-ui, -apple-system, sans-serif',
-    backgroundColor: 'transparent',
-    border: '1px solid var(--border-color)',
-    borderRadius: '8px',
-    padding: '11px 16px',
-    cursor: 'pointer',
-    marginTop: '8px',
-    marginBottom: '8px',
-    width: '100%',
-    textAlign: 'center',
   },
   fixedBar: {
     position: 'fixed',
