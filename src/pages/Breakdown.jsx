@@ -201,8 +201,9 @@ export default function Breakdown() {
   async function handleSaveInstrSheet() {
     try {
       await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions: instrSheetDraft });
-      if (session?.billPayer) {
-        await updateDoc(doc(db, 'sessions', sessionId, 'members', session.billPayer), { paymentInstructions: instrSheetDraft }).catch(() => {});
+      const instrMemberId = session?.multiPayer ? currentMemberId : session?.billPayer;
+      if (instrMemberId) {
+        await updateDoc(doc(db, 'sessions', sessionId, 'members', instrMemberId), { paymentInstructions: instrSheetDraft }).catch(() => {});
       }
       setPaymentInstructions(instrSheetDraft);
       setInstrSheetOpen(false);
@@ -557,10 +558,6 @@ export default function Breakdown() {
                 <span style={s.memberName}>
                   {member.name}{isMe ? ' (you)' : ''}
                 </span>
-                {session.billPayer === member.id && (
-                  <span style={s.billPayerPill}>Bill Payer</span>
-                )}
-
               </div>
               <div style={s.cardRight}>
                 <span style={s.venueTotal}>${grandTotal.toFixed(2)}</span>
@@ -655,7 +652,6 @@ export default function Breakdown() {
         const myPaid = myData.paid ?? false;
         const mySelfReported = myData.selfReported ?? false;
         if (myPaid && !mySelfReported) return null;
-        const billPayerName = members.find(m => m.id === session?.billPayer)?.name ?? 'the bill payer';
         return (
           <div style={s.selfPaidWrap}>
             <button
@@ -665,7 +661,7 @@ export default function Breakdown() {
               {myPaid && mySelfReported ? "Marked as paid ✓ · Undo" : "I've paid"}
             </button>
             {!(myPaid && mySelfReported) && (
-              <div style={s.selfPaidHint}>Let {billPayerName} know you've settled up.</div>
+              <div style={s.selfPaidHint}>Let the group know you've settled up.</div>
             )}
           </div>
         );
