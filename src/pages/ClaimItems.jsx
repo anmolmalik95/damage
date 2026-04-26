@@ -68,6 +68,7 @@ export default function ClaimItems() {
   const [billPayerPickerOpen, setBillPayerPickerOpen] = useState(false);
   const [billPayersSheetOpen, setBillPayersSheetOpen] = useState(false);
   const [venueBillPayers, setVenueBillPayers] = useState({});
+  const [cabItemPayers, setCabItemPayers] = useState({});
   const [endSessionConfirmOpen, setEndSessionConfirmOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
@@ -120,6 +121,12 @@ export default function ClaimItems() {
       const initial = {};
       list.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
       setVenueBillPayers(initial);
+      const cabInitial = {};
+      const transportVenue = list.find(v => v.name === 'Transport' || v.isTransport);
+      if (transportVenue) {
+        transportVenue.items.forEach(item => { if (item.billPayer) cabInitial[item.id] = item.billPayer; });
+      }
+      setCabItemPayers(cabInitial);
     });
 
     return () => { unsubSession(); unsubMembers(); unsubClaims(); };
@@ -373,6 +380,13 @@ export default function ClaimItems() {
     } catch (err) { console.error(err); }
   }
 
+  async function handleSetCabItemPayer(transportVenueId, itemId, memberId) {
+    setCabItemPayers(prev => ({ ...prev, [itemId]: memberId }));
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId, 'venues', transportVenueId, 'items', itemId), { billPayer: memberId });
+    } catch (err) { console.error(err); }
+  }
+
   async function handleEndSessionFromMenu() {
     try {
       await updateDoc(doc(db, 'sessions', sessionId), { status: 'locked' });
@@ -574,9 +588,6 @@ export default function ClaimItems() {
                   <div style={s.personLeft}>
                     <Avatar name={member.name} index={idx} />
                     <span style={s.personName}>{member.name}</span>
-                    {session?.billPayer === member.id && (
-                      <span style={s.billPayerPill}>Bill Payer</span>
-                    )}
                     {member.doneClaiming && (
                       <span style={s.doneClaimingPill}>Done claiming</span>
                     )}
@@ -769,27 +780,56 @@ export default function ClaimItems() {
             <div style={s.sheetHandle} />
             <div style={s.sheetTitle}>Manage bill payers</div>
             <div style={s.sheetSubtitle}>Set who paid for each venue.</div>
-            {venues.map(venue => (
-              <div key={venue.id} style={{ marginBottom: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                  {venue.name}
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {members.map(m => {
-                    const sel = venueBillPayers[venue.id] === m.id;
-                    return (
-                      <button
-                        key={m.id}
-                        style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: sel ? 'var(--text-primary)' : 'var(--bg-secondary)', color: sel ? 'var(--bg-primary)' : 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                        onClick={() => handleSetVenueBillPayer(venue.id, m.id)}
-                      >
-                        {m.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+            {(() => {
+              const nonTransportVenues = venues.filter(v => v.name !== 'Transport' && !v.isTransport);
+              const transportVenue = venues.find(v => v.name === 'Transport' || v.isTransport);
+              return (
+                <>
+                  {nonTransportVenues.map(venue => (
+                    <div key={venue.id} style={{ marginBottom: '16px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                        {venue.name}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {members.map(m => {
+                          const sel = venueBillPayers[venue.id] === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: sel ? 'var(--text-primary)' : 'var(--bg-secondary)', color: sel ? 'var(--bg-primary)' : 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              onClick={() => handleSetVenueBillPayer(venue.id, m.id)}
+                            >
+                              {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {transportVenue && transportVenue.items.map(item => (
+                    <div key={item.id} style={{ marginBottom: '16px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                        {item.name}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {members.map(m => {
+                          const sel = cabItemPayers[item.id] === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: sel ? 'var(--text-primary)' : 'var(--bg-secondary)', color: sel ? 'var(--bg-primary)' : 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              onClick={() => handleSetCabItemPayer(transportVenue.id, item.id, m.id)}
+                            >
+                              {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
             <button style={s.sheetConfirmBtn} onClick={() => setBillPayersSheetOpen(false)}>Done</button>
           </div>
         </>

@@ -146,7 +146,7 @@ export default function NewSession() {
         <div style={styles.fieldGroup}>
           <label style={styles.label}>Date</label>
           <input
-            style={{ ...styles.input, colorScheme: 'light dark' }}
+            style={{ ...styles.input, colorScheme: 'light dark', textAlign: 'left' }}
             type="date"
             value={date}
             onChange={e => setDate(e.target.value)}

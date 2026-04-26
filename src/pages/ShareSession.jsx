@@ -30,9 +30,7 @@ export default function ShareSession() {
   // Transport
   const [transportVenueId, setTransportVenueId] = useState(null);
   const [transportItems, setTransportItems] = useState([]);
-  const [allCabPayer, setAllCabPayer] = useState(null);
   const [cabPayers, setCabPayers] = useState({});
-  const [cabsExpanded, setCabsExpanded] = useState(false);
 
   const [newName, setNewName] = useState('');
   const [members, setMembers] = useState(() => {
@@ -104,9 +102,6 @@ export default function ShareSession() {
         if (Object.keys(cabInitial).length > 0) {
           setCabPayers(cabInitial);
         }
-        // Pre-fill allCabPayer if all cabs have same payer
-        const uniquePayers = [...new Set(Object.values(cabInitial))];
-        if (uniquePayers.length === 1) setAllCabPayer(uniquePayers[0]);
       }
     }
     loadVenues();
@@ -170,6 +165,8 @@ export default function ShareSession() {
   async function handleOpen() {
     setError('');
     setOpening(true);
+    // Flush any pending debounced payment instructions save
+    clearTimeout(instrDebounceRef.current);
     try {
       if (multiPayer) {
         await updateDoc(doc(db, 'sessions', sessionId), { status: 'open', multiPayer: true });
@@ -181,25 +178,24 @@ export default function ShareSession() {
         );
         // Write per-cab payers
         if (transportVenueId && transportItems.length > 0) {
-          if (cabsExpanded) {
-            await Promise.all(
-              transportItems
-                .filter(item => cabPayers[item.id])
-                .map(item => updateDoc(doc(db, 'sessions', sessionId, 'venues', transportVenueId, 'items', item.id), { billPayer: cabPayers[item.id] }))
-            );
-          } else if (allCabPayer) {
-            await Promise.all(
-              transportItems.map(item =>
-                updateDoc(doc(db, 'sessions', sessionId, 'venues', transportVenueId, 'items', item.id), { billPayer: allCabPayer })
-              )
-            );
-          }
+          await Promise.all(
+            transportItems
+              .filter(item => cabPayers[item.id])
+              .map(item => updateDoc(doc(db, 'sessions', sessionId, 'venues', transportVenueId, 'items', item.id), { billPayer: cabPayers[item.id] }))
+          );
         }
       } else {
         // Single payer: write to session AND all venues
         await updateDoc(doc(db, 'sessions', sessionId), { status: 'open', billPayer, multiPayer: false });
         const allVenueSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
         await Promise.all(allVenueSnap.docs.map(d => updateDoc(d.ref, { billPayer })));
+        // Explicitly persist payment instructions in case debounce hadn't fired
+        if (paymentInstructions) {
+          await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions });
+          if (billPayer) {
+            await updateDoc(doc(db, 'sessions', sessionId, 'members', billPayer), { paymentInstructions }).catch(() => {});
+          }
+        }
       }
       sessionStorage.removeItem(membersDraftKey(sessionId));
       sessionStorage.removeItem(`draft_confirm_${sessionId}`);
@@ -218,7 +214,7 @@ export default function ShareSession() {
   ];
 
   const transportCovered = transportItems.length === 0 ||
-    (cabsExpanded ? transportItems.every(item => !!cabPayers[item.id]) : !!allCabPayer);
+    transportItems.every(item => !!cabPayers[item.id]);
 
   const canOpen = multiPayer
     ? venues.every(v => !!venuePayers[v.id]) && transportCovered
@@ -305,7 +301,7 @@ export default function ShareSession() {
           </>
         ) : (
           <>
-            <button style={styles.multiPayerLink} onClick={() => { setMultiPayer(false); setVenuePayers({}); setCabPayers({}); setCabsExpanded(false); setAllCabPayer(null); }}>
+            <button style={styles.multiPayerLink} onClick={() => { setMultiPayer(false); setVenuePayers({}); setCabPayers({}); }}>
               ← Single payer
             </button>
             <div style={styles.venuePayersSection}>
@@ -332,52 +328,25 @@ export default function ShareSession() {
               {transportItems.length > 0 && (
                 <div style={styles.venuePayerBlock}>
                   <div style={styles.venuePayerLabel}>Transport</div>
-                  {!cabsExpanded ? (
-                    <>
+                  {transportItems.map(item => (
+                    <div key={item.id} style={{ marginBottom: '12px' }}>
+                      <div style={styles.cabItemLabel}>{item.name}</div>
                       <div style={styles.chipRow}>
                         {allChipMembers.map(m => {
-                          const sel = allCabPayer === m.id;
+                          const sel = cabPayers[item.id] === m.id;
                           return (
                             <button
                               key={m.id}
                               style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
-                              onClick={() => setAllCabPayer(m.id)}
+                              onClick={() => setCabPayers(p => ({ ...p, [item.id]: m.id }))}
                             >
                               {m.name}
                             </button>
                           );
                         })}
                       </div>
-                      <button style={styles.expandCabsLink} onClick={() => setCabsExpanded(true)}>
-                        Different people paid for different cabs ›
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {transportItems.map(item => (
-                        <div key={item.id} style={{ marginBottom: '12px' }}>
-                          <div style={styles.cabItemLabel}>{item.name}</div>
-                          <div style={styles.chipRow}>
-                            {allChipMembers.map(m => {
-                              const sel = cabPayers[item.id] === m.id;
-                              return (
-                                <button
-                                  key={m.id}
-                                  style={{ ...styles.chip, ...(sel ? styles.chipSel : {}) }}
-                                  onClick={() => setCabPayers(p => ({ ...p, [item.id]: m.id }))}
-                                >
-                                  {m.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                      <button style={styles.expandCabsLink} onClick={() => { setCabsExpanded(false); setCabPayers({}); }}>
-                        ← All cabs same payer
-                      </button>
-                    </>
-                  )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

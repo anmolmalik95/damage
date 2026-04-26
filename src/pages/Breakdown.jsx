@@ -39,6 +39,7 @@ export default function Breakdown() {
   const [instrSheetDraft, setInstrSheetDraft] = useState('');
   const [billPayersSheetOpen, setBillPayersSheetOpen] = useState(false);
   const [venueBillPayers, setVenueBillPayers] = useState({});
+  const [cabItemPayers, setCabItemPayers] = useState({});
 
   useEffect(() => {
     document.title = session?.name ? `Breakdown · ${session.name} — Unfuck` : 'Unfuck';
@@ -95,6 +96,12 @@ export default function Breakdown() {
       const initial = {};
       venueList.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
       setVenueBillPayers(initial);
+      const cabInitial = {};
+      const transportVenue = venueList.find(v => v.name === 'Transport' || v.isTransport);
+      if (transportVenue) {
+        transportVenue.items.forEach(item => { if (item.billPayer) cabInitial[item.id] = item.billPayer; });
+      }
+      setCabItemPayers(cabInitial);
       loadStateRef.current.venues = true;
       checkLoaded();
     });
@@ -219,6 +226,13 @@ export default function Breakdown() {
     } catch (err) { console.error(err); }
   }
 
+  async function handleSetCabItemPayer(transportVenueId, itemId, memberId) {
+    setCabItemPayers(prev => ({ ...prev, [itemId]: memberId }));
+    try {
+      await updateDoc(doc(db, 'sessions', sessionId, 'venues', transportVenueId, 'items', itemId), { billPayer: memberId });
+    } catch (err) { console.error(err); }
+  }
+
   async function handleRenameSave() {
     const name = renameValue.trim();
     if (!name) return;
@@ -293,12 +307,37 @@ export default function Breakdown() {
 
     const netBalances = {};
     for (const { venue, memberData } of venueDataMap) {
-      const vBillPayer = venue.billPayer;
-      if (!vBillPayer) continue;
-      for (const [memberId, data] of Object.entries(memberData)) {
-        if (memberId === vBillPayer) continue;
-        netBalances[memberId] = (netBalances[memberId] || 0) - data.total;
-        netBalances[vBillPayer] = (netBalances[vBillPayer] || 0) + data.total;
+      const isTransport = venue.name === 'Transport' || venue.isTransport;
+      if (isTransport) {
+        // Transport uses per-item bill payers
+        for (const item of venue.items) {
+          const itemBillPayer = item.billPayer;
+          if (!itemBillPayer) continue;
+          const itemClaims = claims.filter(c => c.itemId === item.id);
+          for (const claim of itemClaims) {
+            if (claim.type === 'whole') {
+              const debtor = claim.memberId;
+              if (debtor === itemBillPayer) continue;
+              netBalances[debtor] = (netBalances[debtor] || 0) - (item.unitPrice ?? 0);
+              netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + (item.unitPrice ?? 0);
+            } else if (claim.type === 'shared') {
+              const share = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
+              for (const debtor of (claim.sharedWith || [])) {
+                if (debtor === itemBillPayer) continue;
+                netBalances[debtor] = (netBalances[debtor] || 0) - share;
+                netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + share;
+              }
+            }
+          }
+        }
+      } else {
+        const vBillPayer = venue.billPayer;
+        if (!vBillPayer) continue;
+        for (const [memberId, data] of Object.entries(memberData)) {
+          if (memberId === vBillPayer) continue;
+          netBalances[memberId] = (netBalances[memberId] || 0) - data.total;
+          netBalances[vBillPayer] = (netBalances[vBillPayer] || 0) + data.total;
+        }
       }
     }
     const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
@@ -366,25 +405,30 @@ export default function Breakdown() {
         </div>
       )}
 
-      {/* Multi-payer: per-creditor debt cards */}
-      {!isReadOnly && session.multiPayer && debtTransactions.length > 0 && (
-        <>
-          {debtTransactions
-            .filter(t => t.fromId === currentMemberId || t.toId === currentMemberId)
-            .map((t, i) => {
-              const isOwing = t.fromId === currentMemberId;
-              const other = members.find(m => m.id === (isOwing ? t.toId : t.fromId));
-              const instr = other?.paymentInstructions;
-              return (
-                <div key={i} style={{ ...s.owesCard, marginBottom: '12px' }}>
-                  <div style={s.owesPayName}>{isOwing ? `Pay ${other?.name ?? '?'}` : `${other?.name ?? '?'} owes you`}</div>
-                  <div style={s.owesAmount}>{isOwing ? 'You owe' : "You're owed"} ${t.amount.toFixed(2)}</div>
-                  {isOwing && instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
-                </div>
-              );
-            })}
-        </>
-      )}
+      {/* Multi-payer: per-creditor debt cards or settled message */}
+      {!isReadOnly && session.multiPayer && (() => {
+        const myTransactions = debtTransactions.filter(t => t.fromId === currentMemberId || t.toId === currentMemberId);
+        if (myTransactions.length === 0) {
+          return (
+            <div style={{ ...s.owesCard, marginBottom: '16px' }}>
+              <div style={s.owesPayName}>You're all settled ✓</div>
+              <div style={s.owesAmount}>No outstanding debts</div>
+            </div>
+          );
+        }
+        return myTransactions.map((t, i) => {
+          const isOwing = t.fromId === currentMemberId;
+          const other = members.find(m => m.id === (isOwing ? t.toId : t.fromId));
+          const instr = other?.paymentInstructions;
+          return (
+            <div key={i} style={{ ...s.owesCard, marginBottom: '12px' }}>
+              <div style={s.owesPayName}>{isOwing ? `Pay ${other?.name ?? '?'}` : `${other?.name ?? '?'} owes you`}</div>
+              <div style={s.owesAmount}>{isOwing ? 'You owe' : "You're owed"} ${t.amount.toFixed(2)}</div>
+              {isOwing && instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
+            </div>
+          );
+        });
+      })()}
 
       {/* Payment instructions — for admin/bill payer editing, or read-only users */}
       {(isAdmin || isBillPayer) && (
@@ -726,27 +770,56 @@ export default function Breakdown() {
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px' }}>
               Set who paid for each venue.
             </div>
-            {venues.map(venue => (
-              <div key={venue.id} style={{ marginBottom: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                  {venue.name}
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {members.map(m => {
-                    const sel = venueBillPayers[venue.id] === m.id;
-                    return (
-                      <button
-                        key={m.id}
-                        style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: sel ? 'var(--text-primary)' : 'var(--bg-secondary)', color: sel ? 'var(--bg-primary)' : 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                        onClick={() => handleSetVenueBillPayer(venue.id, m.id)}
-                      >
-                        {m.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+            {(() => {
+              const nonTransportVenues = venues.filter(v => v.name !== 'Transport' && !v.isTransport);
+              const transportVenue = venues.find(v => v.name === 'Transport' || v.isTransport);
+              return (
+                <>
+                  {nonTransportVenues.map(venue => (
+                    <div key={venue.id} style={{ marginBottom: '16px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                        {venue.name}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {members.map(m => {
+                          const sel = venueBillPayers[venue.id] === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: sel ? 'var(--text-primary)' : 'var(--bg-secondary)', color: sel ? 'var(--bg-primary)' : 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              onClick={() => handleSetVenueBillPayer(venue.id, m.id)}
+                            >
+                              {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {transportVenue && transportVenue.items.map(item => (
+                    <div key={item.id} style={{ marginBottom: '16px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                        {item.name}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {members.map(m => {
+                          const sel = cabItemPayers[item.id] === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              style={{ padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontFamily: 'system-ui, -apple-system, sans-serif', border: '0.5px solid var(--border-color)', backgroundColor: sel ? 'var(--text-primary)' : 'var(--bg-secondary)', color: sel ? 'var(--bg-primary)' : 'var(--text-primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                              onClick={() => handleSetCabItemPayer(transportVenue.id, item.id, m.id)}
+                            >
+                              {m.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
             <button
               style={{ ...s.saveBtn, width: '100%', padding: '12px' }}
               onClick={() => setBillPayersSheetOpen(false)}
