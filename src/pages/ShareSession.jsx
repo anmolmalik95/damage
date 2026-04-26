@@ -184,6 +184,10 @@ export default function ShareSession() {
               .map(item => updateDoc(doc(db, 'sessions', sessionId, 'venues', transportVenueId, 'items', item.id), { billPayer: cabPayers[item.id] }))
           );
         }
+        // Persist payment instructions in multi-payer mode
+        if (paymentInstructions.trim()) {
+          await updateDoc(doc(db, 'sessions', sessionId), { paymentInstructions: paymentInstructions.trim() });
+        }
       } else {
         // Single payer: write to session AND all venues
         await updateDoc(doc(db, 'sessions', sessionId), { status: 'open', billPayer, multiPayer: false });

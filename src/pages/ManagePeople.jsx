@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { collection, doc, getDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, writeBatch, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 
@@ -71,15 +71,41 @@ export default function ManagePeople() {
   async function handleDeleteConfirm() {
     if (!deleteTarget) return;
     setDeleting(true);
+    const deletedId = deleteTarget.id;
     try {
       const batch = writeBatch(db);
-      claims.filter(c => c.memberId === deleteTarget.id).forEach(c => {
+
+      // Delete claims where this member is the primary claimer
+      claims.filter(c => c.memberId === deletedId).forEach(c => {
         batch.delete(doc(db, 'sessions', sessionId, 'claims', c.id));
       });
-      batch.delete(doc(db, 'sessions', sessionId, 'members', deleteTarget.id));
+
+      // Clean up sharedWith arrays in other claims
+      claims
+        .filter(c => c.memberId !== deletedId && c.sharedWith?.includes(deletedId))
+        .forEach(c => {
+          const newSharedWith = c.sharedWith.filter(id => id !== deletedId);
+          if (newSharedWith.length === 0) {
+            batch.delete(doc(db, 'sessions', sessionId, 'claims', c.id));
+          } else {
+            batch.update(doc(db, 'sessions', sessionId, 'claims', c.id), { sharedWith: newSharedWith });
+          }
+        });
+
+      batch.delete(doc(db, 'sessions', sessionId, 'members', deletedId));
       await batch.commit();
-      setMembers(p => p.filter(m => m.id !== deleteTarget.id));
-      setClaims(p => p.filter(c => c.memberId !== deleteTarget.id));
+
+      setMembers(p => p.filter(m => m.id !== deletedId));
+      setClaims(p =>
+        p
+          .filter(c => c.memberId !== deletedId)
+          .map(c => {
+            if (!c.sharedWith?.includes(deletedId)) return c;
+            const newSharedWith = c.sharedWith.filter(id => id !== deletedId);
+            return newSharedWith.length === 0 ? null : { ...c, sharedWith: newSharedWith };
+          })
+          .filter(Boolean)
+      );
       setDeleteTarget(null);
     } catch (err) {
       console.error(err);

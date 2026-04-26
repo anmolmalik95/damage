@@ -65,7 +65,6 @@ export default function ClaimItems() {
   const [showNewPersonInput, setShowNewPersonInput] = useState(false);
   const [finaliseLoading, setFinaliseLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [billPayerPickerOpen, setBillPayerPickerOpen] = useState(false);
   const [billPayersSheetOpen, setBillPayersSheetOpen] = useState(false);
   const [venueBillPayers, setVenueBillPayers] = useState({});
   const [cabItemPayers, setCabItemPayers] = useState({});
@@ -365,12 +364,6 @@ export default function ClaimItems() {
       setRenameOpen(false);
       showToast('Session renamed', 'success');
     } catch (err) { console.error(err); }
-  }
-
-  async function handleChangeBillPayer(memberId) {
-    await updateDoc(doc(db, 'sessions', sessionId), { billPayer: memberId });
-    setBillPayerPickerOpen(false);
-    showToast('Bill payer updated', 'success');
   }
 
   async function handleSetVenueBillPayer(venueId, memberId) {
@@ -752,25 +745,6 @@ export default function ClaimItems() {
           </>
         );
       })()}
-
-      {/* Bill payer picker sheet */}
-      {billPayerPickerOpen && (
-        <>
-          <div style={s.backdrop} onClick={() => setBillPayerPickerOpen(false)} />
-          <div style={s.sheet}>
-            <div style={s.sheetHandle} />
-            <div style={s.sheetTitle}>Change bill payer</div>
-            <div style={s.sheetSubtitle}>Select who paid the bill for this session.</div>
-            {members.map((member, idx) => (
-              <div key={member.id} style={s.sheetMemberRow} onClick={() => handleChangeBillPayer(member.id)}>
-                <Avatar name={member.name} index={idx} />
-                <span style={s.sheetMemberName}>{member.name}</span>
-                {session?.billPayer === member.id && <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginLeft: 'auto' }}>Current</span>}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
 
       {/* Manage bill payers sheet */}
       {billPayersSheetOpen && (

@@ -113,7 +113,7 @@ export default function Admin() {
 
   async function handleReopen(sessionId) {
     try {
-      await updateDoc(doc(db, 'sessions', sessionId), { status: 'locked' });
+      await updateDoc(doc(db, 'sessions', sessionId), { status: 'open' });
     } catch (err) { console.error(err); }
   }
 

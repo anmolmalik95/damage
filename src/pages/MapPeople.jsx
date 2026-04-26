@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
 import { clusterMembers, fetchSessionData } from '../utils/reconcileUtils';
@@ -20,6 +20,7 @@ export default function MapPeople() {
   const [canonicalNames, setCanonicalNames] = useState({});
   // confirmedGroups: array of group arrays we're keeping
   const [confirmedGroups, setConfirmedGroups] = useState([]);
+  const confirmedGroupsRef = useRef([]);
 
   useEffect(() => { document.title = 'Reconcile — Unfuck'; }, []);
 
@@ -69,7 +70,9 @@ export default function MapPeople() {
       });
 
     if (resolved.length >= 2) {
-      setConfirmedGroups(prev => [...prev, { group: resolved, name: canonicalNames[currentIdx] ?? '' }]);
+      const newGroups = [...confirmedGroupsRef.current, { group: resolved, name: canonicalNames[currentIdx] ?? '' }];
+      confirmedGroupsRef.current = newGroups;
+      setConfirmedGroups(newGroups);
     }
     advance();
   }
@@ -80,9 +83,8 @@ export default function MapPeople() {
 
   function advance() {
     if (currentIdx >= initialGroups.length - 1) {
-      // Build final canonicalGroups array and names
-      const finalGroups = confirmedGroups.map(cg => cg.group);
-      const finalNames = confirmedGroups.map(cg => cg.name);
+      const finalGroups = confirmedGroupsRef.current.map(cg => cg.group);
+      const finalNames = confirmedGroupsRef.current.map(cg => cg.name);
       navigate('/reconcile/settlement', { state: { sessions, canonicalGroups: finalGroups, canonicalNames: finalNames } });
     } else {
       setCurrentIdx(prev => prev + 1);
