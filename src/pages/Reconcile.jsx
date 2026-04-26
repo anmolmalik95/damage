@@ -3,18 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 
 export default function Reconcile() {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [continuing, setContinuing] = useState(false);
 
   useEffect(() => { document.title = 'Reconcile — Unfuck'; }, []);
 
   useEffect(() => {
     async function load() {
+      setError('');
+      try {
       const q = query(collection(db, 'sessions'), where('status', '==', 'locked'));
       const snap = await getDocs(q);
 
@@ -25,7 +29,16 @@ export default function Reconcile() {
             getDocs(collection(db, 'sessions', d.id, 'members')),
             getDocs(collection(db, 'sessions', d.id, 'venues')),
           ]);
-          const total = venuesSnap.docs.reduce((sum, v) => sum + (v.data().receiptTotal || 0), 0);
+
+          let total = 0;
+          for (const vDoc of venuesSnap.docs) {
+            const vData = vDoc.data();
+            const iSnap = await getDocs(collection(db, 'sessions', d.id, 'venues', vDoc.id, 'items'));
+            total += iSnap.docs.reduce((s, iDoc) => {
+              const item = iDoc.data();
+              return s + (item.unitPrice ?? 0) * (item.quantity ?? 1);
+            }, 0) + (vData.gstAmount || 0) + (vData.serviceChargeAmount || 0);
+          }
 
           let billPayerName = null;
           if (data.billPayer) {
@@ -46,6 +59,11 @@ export default function Reconcile() {
 
       setSessions(sessionList);
       setLoading(false);
+      } catch (err) {
+        console.error(err);
+        setError('Sessions couldn\'t load. Check your connection and try again.');
+        setLoading(false);
+      }
     }
     load();
   }, []);
@@ -75,7 +93,30 @@ export default function Reconcile() {
     } catch { return dateStr; }
   };
 
-  if (loading) return null;
+  if (loading) return (
+    <PageContainer>
+      <div style={s.header}>
+        <button style={s.back} onClick={() => navigate('/')}>←</button>
+        <div style={s.headerText}>
+          <div style={s.title}>Reconcile sessions</div>
+        </div>
+      </div>
+      {[...Array(3)].map((_, i) => (
+        <SkeletonBlock key={i} height="60px" borderRadius="12px" style={{ marginBottom: '8px' }} />
+      ))}
+    </PageContainer>
+  );
+
+  if (error) return (
+    <PageContainer>
+      <div style={s.header}>
+        <button style={s.back} onClick={() => navigate('/')}>←</button>
+        <div style={s.headerText}><div style={s.title}>Reconcile sessions</div></div>
+      </div>
+      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textAlign: 'center', padding: '40px 0 20px' }}>{error}</div>
+      <button style={s.btn} onClick={() => { setLoading(true); setError(''); }}>Retry</button>
+    </PageContainer>
+  );
 
   return (
     <PageContainer>

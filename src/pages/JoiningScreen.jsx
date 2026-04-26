@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getDocs, getDoc, doc, collection } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 import { useNavigation } from '../context/NavigationContext';
 
 export default function JoiningScreen() {
@@ -65,7 +66,10 @@ export default function JoiningScreen() {
       setLoading(false);
     }
 
-    load();
+    load().catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
   }, [sessionId, currentMemberId, navigate]);
 
   function handleBack() {
@@ -81,7 +85,16 @@ export default function JoiningScreen() {
     }
   }
 
-  if (loading) return null;
+  if (loading) return (
+    <PageContainer>
+      {[...Array(4)].map((_, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+          <SkeletonBlock width="26px" height="26px" borderRadius="50%" />
+          <SkeletonBlock width="120px" height="14px" />
+        </div>
+      ))}
+    </PageContainer>
+  );
 
   const allItems = venues.flatMap(v =>
     v.items.map(i => ({ ...i, venueId: v.id, venueName: v.name }))

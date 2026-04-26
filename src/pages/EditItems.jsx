@@ -6,6 +6,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 
 function parseCabName(name) {
   const fromToMatch = name.match(/^Cab from (.+?) to (.+)$/);
@@ -35,6 +36,7 @@ export default function EditItems() {
   const [venues, setVenues] = useState([]);
   const [newCabs, setNewCabs] = useState([]); // new cabs to add to transport
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletedItemIds, setDeletedItemIds] = useState({}); // { [venueId]: Set<firestoreId> }
   const [deletedVenueIds, setDeletedVenueIds] = useState(() => new Set());
@@ -81,7 +83,11 @@ export default function EditItems() {
       setVenues(venueList);
       setLoading(false);
     }
-    load();
+    load().catch(err => {
+      console.error(err);
+      setError(true);
+      setLoading(false);
+    });
 
     return () => {
       if (!hasExplicitlyClearedRef.current) {
@@ -330,7 +336,38 @@ export default function EditItems() {
     } catch (err) { console.error(err); }
   }
 
-  if (loading) return null;
+  if (loading || error) return (
+    <PageContainer>
+      <div style={st.header}>
+        <div><div style={st.title}>Edit items</div></div>
+      </div>
+      {error ? (
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px' }}>Failed to load items.</div>
+          <button style={{ fontSize: '13px', color: 'var(--text-primary)', background: 'none', border: '0.5px solid var(--border-color)', borderRadius: '8px', padding: '8px 20px', cursor: 'pointer', fontFamily: 'system-ui, -apple-system, sans-serif' }} onClick={() => { setError(false); setLoading(true); }}>Retry</button>
+        </div>
+      ) : (
+        <>
+          {[0, 1].map(vi => (
+            <div key={vi} style={{ ...st.venueBlock, marginBottom: '16px' }}>
+              <div style={{ ...st.venueHeader }}>
+                <SkeletonBlock width="100px" height="13px" />
+              </div>
+              {[0, 1, 2, 3].map(ri => (
+                <div key={ri} style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '0.5px solid var(--border-color)', gap: '8px' }}>
+                  <div style={{ flex: 1 }}>
+                    <SkeletonBlock width="60%" height="13px" style={{ marginBottom: '4px' }} />
+                    <SkeletonBlock width="40%" height="11px" />
+                  </div>
+                  <SkeletonBlock width="20px" height="20px" borderRadius="4px" />
+                </div>
+              ))}
+            </div>
+          ))}
+        </>
+      )}
+    </PageContainer>
+  );
 
   const isTransportVenue = v => v.name === 'Transport' || v.isTransport;
 

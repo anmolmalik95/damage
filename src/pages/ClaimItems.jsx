@@ -103,32 +103,52 @@ export default function ClaimItems() {
       setClaims(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // Venues + items are static after confirm — one-time fetch
-    getDocs(collection(db, 'sessions', sessionId, 'venues')).then(async vSnap => {
-      const list = await Promise.all(
-        vSnap.docs.map(async vDoc => {
-          const iSnap = await getDocs(
-            collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items')
-          );
-          return {
-            id: vDoc.id, ...vDoc.data(),
-            items: iSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-          };
-        })
-      );
-      setVenues(list);
-      const initial = {};
-      list.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
-      setVenueBillPayers(initial);
-      const cabInitial = {};
-      const transportVenue = list.find(v => v.name === 'Transport' || v.isTransport);
-      if (transportVenue) {
-        transportVenue.items.forEach(item => { if (item.billPayer) cabInitial[item.id] = item.billPayer; });
-      }
-      setCabItemPayers(cabInitial);
+    // Realtime venues + items listeners
+    const itemUnsubsRef = { current: [] };
+    const venueBaseMap = {};
+    const itemDataMap = {};
+
+    function rebuildVenues(vDocs) {
+      const result = vDocs.map(vDoc => ({
+        ...venueBaseMap[vDoc.id],
+        items: itemDataMap[vDoc.id] ?? [],
+      }));
+      setVenues(result);
+      const newVenPayers = {};
+      result.forEach(v => { if (v.billPayer) newVenPayers[v.id] = v.billPayer; });
+      setVenueBillPayers(newVenPayers);
+      const newCabPayers = {};
+      const tv = result.find(v => v.name === 'Transport' || v.isTransport);
+      if (tv) tv.items.forEach(item => { if (item.billPayer) newCabPayers[item.id] = item.billPayer; });
+      setCabItemPayers(newCabPayers);
+    }
+
+    const unsubVenues = onSnapshot(collection(db, 'sessions', sessionId, 'venues'), venuesSnap => {
+      venuesSnap.docs.forEach(vDoc => {
+        venueBaseMap[vDoc.id] = { id: vDoc.id, ...vDoc.data() };
+      });
+      Object.keys(itemDataMap).forEach(vId => {
+        if (!venuesSnap.docs.find(d => d.id === vId)) delete itemDataMap[vId];
+      });
+
+      itemUnsubsRef.current.forEach(u => u());
+      itemUnsubsRef.current = [];
+
+      venuesSnap.docs.forEach(vDoc => {
+        const unsub = onSnapshot(
+          collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'),
+          itemsSnap => {
+            itemDataMap[vDoc.id] = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            rebuildVenues(venuesSnap.docs);
+          }
+        );
+        itemUnsubsRef.current.push(unsub);
+      });
+
+      rebuildVenues(venuesSnap.docs);
     });
 
-    return () => { unsubSession(); unsubMembers(); unsubClaims(); };
+    return () => { unsubSession(); unsubMembers(); unsubClaims(); unsubVenues(); itemUnsubsRef.current.forEach(u => u()); };
   }, [sessionId, currentMemberId]);
 
   const targetId = claimingForId || currentMemberId;
@@ -303,7 +323,7 @@ export default function ClaimItems() {
   }
 
   async function handleCopyLink() {
-    const url = `https://unfuck.malik.codes/s/${sessionId}`;
+    const url = `${window.location.origin}/s/${sessionId}`;
     try { await navigator.clipboard.writeText(url); }
     catch {
       const el = document.createElement('textarea');
@@ -381,11 +401,37 @@ export default function ClaimItems() {
   }
 
   async function handleEndSessionFromMenu() {
+    setEndSessionConfirmOpen(false);
+    setFinaliseLoading(true);
     try {
       await updateDoc(doc(db, 'sessions', sessionId), { status: 'locked' });
-      setEndSessionConfirmOpen(false);
-      navigateForward(`/session/${sessionId}/resolve`);
-    } catch (err) { console.error(err); }
+
+      const [claimsSnap, venuesSnap] = await Promise.all([
+        getDocs(collection(db, 'sessions', sessionId, 'claims')),
+        getDocs(collection(db, 'sessions', sessionId, 'venues')),
+      ]);
+      const allClaims = claimsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      let needsResolve = false;
+      await Promise.all(venuesSnap.docs.map(async vDoc => {
+        const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'));
+        iSnap.docs.forEach(iDoc => {
+          const item = iDoc.data();
+          const qty = item.quantity ?? 1;
+          const itemClaims = allClaims.filter(c => c.itemId === iDoc.id);
+          if (itemClaims.length > qty) { needsResolve = true; return; }
+          const claimedNums = new Set(itemClaims.map(c => c.instanceNumber));
+          for (let n = 1; n <= qty; n++) {
+            if (!claimedNums.has(n)) { needsResolve = true; break; }
+          }
+        });
+      }));
+
+      navigateForward(`/session/${sessionId}/${needsResolve ? 'resolve' : 'breakdown'}`, { state: { from: 'claim' } });
+    } catch (err) {
+      console.error(err);
+      setFinaliseLoading(false);
+    }
   }
 
   function calcTotals() {

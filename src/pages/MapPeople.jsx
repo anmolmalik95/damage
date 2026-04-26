@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 import { clusterMembers, fetchSessionData } from '../utils/reconcileUtils';
 
 export default function MapPeople() {
@@ -10,6 +11,7 @@ export default function MapPeople() {
 
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [initialGroups, setInitialGroups] = useState([]);
 
   // Card-by-card state
@@ -28,6 +30,8 @@ export default function MapPeople() {
     if (!sessionIds.length) { navigate('/reconcile', { replace: true }); return; }
 
     async function load() {
+      setError('');
+      try {
       const sessionData = (await Promise.all(sessionIds.map(fetchSessionData))).filter(Boolean);
       setSessions(sessionData);
 
@@ -45,14 +49,32 @@ export default function MapPeople() {
         group.forEach(m => {
           if (!initSel[idx][m.sessionId]) initSel[idx][m.sessionId] = m.memberId;
         });
-        // Default canonical name = first member's name in the group
         const first = group[0];
         const session = sessionData.find(s => s.id === first.sessionId);
         initNames[idx] = session?.members.find(m => m.id === first.memberId)?.name ?? '';
       });
       setCardSelections(initSel);
       setCanonicalNames(initNames);
+
+      // Restore progress if coming back from settlement
+      const savedRaw = sessionStorage.getItem('reconcile_progress');
+      if (savedRaw) {
+        try {
+          const { confirmedGroups: saved, nextIdx } = JSON.parse(savedRaw);
+          if (Array.isArray(saved)) {
+            confirmedGroupsRef.current = saved;
+            setConfirmedGroups(saved);
+            setCurrentIdx(Math.min(nextIdx ?? saved.length, clusters.length - 1));
+          }
+        } catch {}
+      }
+
       setLoading(false);
+      } catch (err) {
+        console.error(err);
+        setError('Couldn\'t load sessions. Check your connection and try again.');
+        setLoading(false);
+      }
     }
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -73,16 +95,21 @@ export default function MapPeople() {
       const newGroups = [...confirmedGroupsRef.current, { group: resolved, name: canonicalNames[currentIdx] ?? '' }];
       confirmedGroupsRef.current = newGroups;
       setConfirmedGroups(newGroups);
+      sessionStorage.setItem('reconcile_progress', JSON.stringify({ confirmedGroups: newGroups, nextIdx: currentIdx + 1 }));
+    } else {
+      sessionStorage.setItem('reconcile_progress', JSON.stringify({ confirmedGroups: confirmedGroupsRef.current, nextIdx: currentIdx + 1 }));
     }
     advance();
   }
 
   function handleSkip() {
+    sessionStorage.setItem('reconcile_progress', JSON.stringify({ confirmedGroups: confirmedGroupsRef.current, nextIdx: currentIdx + 1 }));
     advance();
   }
 
   function advance() {
     if (currentIdx >= initialGroups.length - 1) {
+      sessionStorage.removeItem('reconcile_progress');
       const finalGroups = confirmedGroupsRef.current.map(cg => cg.group);
       const finalNames = confirmedGroupsRef.current.map(cg => cg.name);
       navigate('/reconcile/settlement', { state: { sessions, canonicalGroups: finalGroups, canonicalNames: finalNames } });
@@ -91,7 +118,28 @@ export default function MapPeople() {
     }
   }
 
-  if (loading) return null;
+  if (loading) return (
+    <PageContainer>
+      <div style={s.header}>
+        <button style={s.back} onClick={() => navigate('/reconcile')}>←</button>
+        <div style={s.headerText}><div style={s.title}>Match people</div></div>
+      </div>
+      <SkeletonBlock height="120px" borderRadius="12px" style={{ marginBottom: '16px' }} />
+      <SkeletonBlock height="44px" borderRadius="8px" style={{ marginBottom: '8px' }} />
+      <SkeletonBlock height="44px" borderRadius="8px" />
+    </PageContainer>
+  );
+
+  if (error) return (
+    <PageContainer>
+      <div style={s.header}>
+        <button style={s.back} onClick={() => { sessionStorage.removeItem('reconcile_progress'); navigate('/reconcile'); }}>←</button>
+        <div style={s.headerText}><div style={s.title}>Match people</div></div>
+      </div>
+      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textAlign: 'center', padding: '40px 0 20px' }}>{error}</div>
+      <button style={s.confirmBtn} onClick={() => { setLoading(true); setError(''); }}>Retry</button>
+    </PageContainer>
+  );
 
   // If no groups, go straight to settlement
   if (initialGroups.length === 0) {
@@ -108,7 +156,7 @@ export default function MapPeople() {
   return (
     <PageContainer>
       <div style={s.header}>
-        <button style={s.back} onClick={() => navigate('/reconcile')}>←</button>
+        <button style={s.back} onClick={() => { sessionStorage.removeItem('reconcile_progress'); navigate('/reconcile'); }}>←</button>
         <div style={s.headerText}>
           <div style={s.title}>Match people</div>
           <div style={s.subtitle}>Confirm who's the same person across sessions</div>

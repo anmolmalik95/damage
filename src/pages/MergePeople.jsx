@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { collection, doc, getDoc, getDocs, addDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 
 export default function MergePeople() {
   const { sessionId } = useParams();
@@ -59,7 +60,10 @@ export default function MergePeople() {
       setAllItems(items);
       setLoading(false);
     }
-    load();
+    load().catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
   }, [sessionId, fromId, intoId]);
 
   function toggleClaim(id) {
@@ -114,7 +118,26 @@ export default function MergePeople() {
     }
   }
 
-  if (loading) return null;
+  if (loading) return (
+    <PageContainer>
+      <div style={st.header}>
+        <button style={st.back} onClick={() => navigate(-1)}>←</button>
+        <div><div style={st.title}>Merge people</div></div>
+      </div>
+      <div style={st.twoCol}>
+        {[...Array(2)].map((_, ci) => (
+          <div key={ci} style={st.col}>
+            <SkeletonBlock height="36px" borderRadius="0" />
+            {[...Array(3)].map((_, ri) => (
+              <div key={ri} style={{ padding: '8px 10px', borderBottom: '0.5px solid var(--border-color)' }}>
+                <SkeletonBlock height="13px" />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </PageContainer>
+  );
 
   function ClaimRow({ claim }) {
     const item = allItems.find(i => i.id === claim.itemId);

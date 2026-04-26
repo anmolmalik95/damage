@@ -4,6 +4,7 @@ import { getDocs, collection, getDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useNavigation } from '../context/NavigationContext';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 
 export default function ReceiptsScreen() {
   const { sessionId } = useParams();
@@ -27,7 +28,10 @@ export default function ReceiptsScreen() {
       setVenues(venueList);
       setLoading(false);
     }
-    load();
+    load().catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
   }, [sessionId]);
 
   useEffect(() => {
@@ -52,7 +56,24 @@ export default function ReceiptsScreen() {
     setLightbox(l => l ? { ...l, index: Math.min(l.urls.length - 1, l.index + 1) } : null);
   }
 
-  if (loading) return null;
+  if (loading) return (
+    <PageContainer>
+      <div style={st.header}>
+        <button style={st.back} onClick={() => navigateBack(`/session/${sessionId}/breakdown`)}>←</button>
+        <div><div style={st.title}>Receipts</div></div>
+      </div>
+      {[...Array(2)].map((_, vi) => (
+        <div key={vi} style={{ marginBottom: '24px' }}>
+          <SkeletonBlock width="80px" height="11px" style={{ marginBottom: '10px' }} />
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {[...Array(3)].map((_, i) => (
+              <SkeletonBlock key={i} width="80px" height="80px" borderRadius="8px" />
+            ))}
+          </div>
+        </div>
+      ))}
+    </PageContainer>
+  );
 
   return (
     <PageContainer>

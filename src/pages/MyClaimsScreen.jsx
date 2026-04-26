@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { getDocs, getDoc, doc, collection, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 import { useNavigation } from '../context/NavigationContext';
 
 export default function MyClaimsScreen() {
@@ -58,7 +59,10 @@ export default function MyClaimsScreen() {
       setVenues(venueList);
       setLoading(false);
     }
-    load();
+    load().catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
   }, [sessionId, currentMemberId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleStillClaiming() {
@@ -74,7 +78,21 @@ export default function MyClaimsScreen() {
     navigateForward(`/s/${sessionId}`);
   }
 
-  if (loading) return null;
+  if (loading) return (
+    <PageContainer>
+      {[...Array(3)].map((_, vi) => (
+        <div key={vi} style={{ border: '0.5px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden', marginBottom: '16px' }}>
+          <SkeletonBlock height="36px" borderRadius="0" />
+          {[...Array(3)].map((_, ri) => (
+            <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', borderTop: '0.5px solid var(--border-color)' }}>
+              <SkeletonBlock width="50%" height="13px" />
+              <SkeletonBlock width="50px" height="13px" />
+            </div>
+          ))}
+        </div>
+      ))}
+    </PageContainer>
+  );
 
   const allItems = venues.flatMap(v =>
     v.items.map(i => ({ ...i, venueId: v.id, venueName: v.name }))

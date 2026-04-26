@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 import { clusterMembers, fetchSessionData, buildCanonical, simplifyDebts } from '../utils/reconcileUtils';
 import { useToast } from '../context/ToastContext';
 
@@ -33,24 +34,37 @@ export default function ReconcileSettlement() {
   const [sessions, setSessions] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => { document.title = 'Reconcile — Unfuck'; }, []);
 
   useEffect(() => {
     async function loadFromState(stateSessions, stateGroups, stateNames) {
-      setSessions(stateSessions);
-      const { memberToCanonical, canonicals } = buildCanonical(stateSessions, stateGroups, stateNames ?? []);
-      setTransactions(simplifyDebts(stateSessions, memberToCanonical, canonicals));
-      setLoading(false);
+      try {
+        setSessions(stateSessions);
+        const { memberToCanonical, canonicals } = buildCanonical(stateSessions, stateGroups, stateNames ?? []);
+        setTransactions(simplifyDebts(stateSessions, memberToCanonical, canonicals));
+        setLoading(false);
+      } catch (err) {
+        console.error(err);
+        setError('Settlement couldn\'t load. Check your connection and try again.');
+        setLoading(false);
+      }
     }
 
     async function loadFromUrl(sessionIds) {
-      const sessionData = (await Promise.all(sessionIds.map(fetchSessionData))).filter(Boolean);
-      setSessions(sessionData);
-      const groups = autoCanonicalGroups(sessionData);
-      const { memberToCanonical, canonicals } = buildCanonical(sessionData, groups);
-      setTransactions(simplifyDebts(sessionData, memberToCanonical, canonicals));
-      setLoading(false);
+      try {
+        const sessionData = (await Promise.all(sessionIds.map(fetchSessionData))).filter(Boolean);
+        setSessions(sessionData);
+        const groups = autoCanonicalGroups(sessionData);
+        const { memberToCanonical, canonicals } = buildCanonical(sessionData, groups);
+        setTransactions(simplifyDebts(sessionData, memberToCanonical, canonicals));
+        setLoading(false);
+      } catch (err) {
+        console.error(err);
+        setError('Settlement couldn\'t load. Check your connection and try again.');
+        setLoading(false);
+      }
     }
 
     const stateData = location.state;
@@ -66,20 +80,67 @@ export default function ReconcileSettlement() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function handleCopyLink() {
+  function handleBack() {
+    if (location.state?.canonicalGroups) {
+      sessionStorage.setItem('reconcile_progress', JSON.stringify({
+        confirmedGroups: location.state.canonicalGroups.map((group, i) => ({
+          group,
+          name: location.state.canonicalNames?.[i] ?? '',
+        })),
+        nextIdx: location.state.canonicalGroups.length,
+      }));
+    }
+    sessionStorage.setItem('reconcile_session_ids', JSON.stringify(sessions.map(s => s.id)));
+    navigate('/reconcile/map-people', { state: { sessionIds: sessions.map(s => s.id) } });
+  }
+
+  async function handleCopyLink() {
     const ids = sessions.map(s => s.id).join(',');
-    navigator.clipboard.writeText(`https://unfuck.malik.codes/reconcile/settlement?sessions=${ids}`);
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/reconcile/settlement?sessions=${ids}`);
+    } catch {
+      const el = document.createElement('textarea');
+      el.value = `${window.location.origin}/reconcile/settlement?sessions=${ids}`;
+      document.body.appendChild(el); el.select();
+      document.execCommand('copy'); document.body.removeChild(el);
+    }
     showToast('Copied!', 'success');
   }
 
-  if (loading) return null;
+  if (loading) return (
+    <PageContainer>
+      <div style={s.header}>
+        <button style={s.back} onClick={handleBack}>←</button>
+        <div style={s.headerText}><div style={s.title}>Settlement</div></div>
+      </div>
+      <div style={{ border: '0.5px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden', marginBottom: '12px' }}>
+        {[...Array(3)].map((_, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: i < 2 ? '0.5px solid var(--border-color)' : 'none' }}>
+            <SkeletonBlock width="55%" height="14px" />
+            <SkeletonBlock width="60px" height="14px" />
+          </div>
+        ))}
+      </div>
+    </PageContainer>
+  );
+
+  if (error) return (
+    <PageContainer>
+      <div style={s.header}>
+        <button style={s.back} onClick={handleBack}>←</button>
+        <div style={s.headerText}><div style={s.title}>Settlement</div></div>
+      </div>
+      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', textAlign: 'center', padding: '40px 0 20px' }}>{error}</div>
+      <button style={s.shareBtn} onClick={() => { setLoading(true); setError(''); }}>Retry</button>
+    </PageContainer>
+  );
 
   const subtitle = buildSubtitle(sessions);
 
   return (
     <PageContainer>
       <div style={s.header}>
-        <button style={s.back} onClick={() => navigate('/reconcile/map-people', { state: { sessionIds: sessions.map(s => s.id) } })}>←</button>
+        <button style={s.back} onClick={handleBack}>←</button>
         <div style={s.headerText}>
           <div style={s.title}>Settlement</div>
           <div style={s.subtitle}>{subtitle}</div>

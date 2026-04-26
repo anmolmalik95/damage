@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { collection, doc, getDoc, getDocs, writeBatch, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import SkeletonBlock from '../components/SkeletonBlock';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -53,7 +54,10 @@ export default function ManagePeople() {
       setAllItems(items);
       setLoading(false);
     }
-    load();
+    load().catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
   }, [sessionId]);
 
   function memberStats(memberId) {
@@ -118,7 +122,27 @@ export default function ManagePeople() {
     document.title = session?.name ? `Manage people · ${session.name} — Unfuck` : 'Unfuck';
   }, [session?.name]);
 
-  if (loading) return null;
+  if (loading) return (
+    <PageContainer>
+      <div style={st.header}>
+        <button style={st.back} onClick={() => navigate(-1)}>←</button>
+        <div><div style={st.title}>Manage people</div></div>
+      </div>
+      <div style={{ border: '0.5px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' }}>
+        {[...Array(4)].map((_, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', borderBottom: i < 3 ? '0.5px solid var(--border-color)' : 'none' }}>
+            <SkeletonBlock width="28px" height="28px" borderRadius="50%" />
+            <div style={{ flex: 1 }}>
+              <SkeletonBlock width="100px" height="13px" style={{ marginBottom: '4px' }} />
+              <SkeletonBlock width="70px" height="11px" />
+            </div>
+            <SkeletonBlock width="48px" height="26px" borderRadius="6px" style={{ marginRight: '6px' }} />
+            <SkeletonBlock width="52px" height="26px" borderRadius="6px" />
+          </div>
+        ))}
+      </div>
+    </PageContainer>
+  );
 
   return (
     <PageContainer>

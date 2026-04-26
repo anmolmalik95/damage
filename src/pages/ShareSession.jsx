@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { doc, getDoc, getDocs, updateDoc, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, getDocs, updateDoc, collection, addDoc, deleteDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useToast } from '../context/ToastContext';
 import PageContainer from '../components/PageContainer';
 
-const BASE_URL = 'https://unfuck.malik.codes/s';
-const membersDraftKey = id => `draft_share_${id}`;
-
+const BASE_URL = `${window.location.origin}/s`;
 export default function ShareSession() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
@@ -33,13 +31,7 @@ export default function ShareSession() {
   const [cabPayers, setCabPayers] = useState({});
 
   const [newName, setNewName] = useState('');
-  const [members, setMembers] = useState(() => {
-    try {
-      const draft = JSON.parse(sessionStorage.getItem(membersDraftKey(sessionId)));
-      if (Array.isArray(draft)) return draft;
-    } catch {}
-    return [];
-  });
+  const [members, setMembers] = useState([]);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState('');
   const [paymentInstructions, setPaymentInstructions] = useState('');
@@ -53,56 +45,68 @@ export default function ShareSession() {
 
   useEffect(() => {
     async function load() {
-      const snap = await getDoc(doc(db, 'sessions', sessionId));
-      if (!snap.exists()) return;
-      const data = snap.data();
-      setSession(data);
-      if (data.multiPayer) setMultiPayer(true);
-      if (data.paymentInstructions != null) setPaymentInstructions(data.paymentInstructions);
+      try {
+        const snap = await getDoc(doc(db, 'sessions', sessionId));
+        if (!snap.exists()) return;
+        const data = snap.data();
+        setSession(data);
+        if (data.multiPayer) setMultiPayer(true);
+        if (data.paymentInstructions != null) setPaymentInstructions(data.paymentInstructions);
 
-      if (!location.state?.total) {
-        const vSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
-        let total = 0;
-        for (const vDoc of vSnap.docs) {
-          const vData = vDoc.data();
-          const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'));
-          total += iSnap.docs.reduce((s, d) => {
-            const item = d.data();
-            return s + (item.unitPrice ?? 0) * (item.quantity ?? 1);
-          }, 0) + (vData.gstAmount || 0) + (vData.serviceChargeAmount || 0);
+        if (!location.state?.total) {
+          const vSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
+          let total = 0;
+          for (const vDoc of vSnap.docs) {
+            const vData = vDoc.data();
+            const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'));
+            total += iSnap.docs.reduce((s, d) => {
+              const item = d.data();
+              return s + (item.unitPrice ?? 0) * (item.quantity ?? 1);
+            }, 0) + (vData.gstAmount || 0) + (vData.serviceChargeAmount || 0);
+          }
+          setSessionTotal(total);
         }
-        setSessionTotal(total);
-      }
+      } catch (err) { console.error(err); }
     }
     load();
+
+    const unsubMembers = onSnapshot(collection(db, 'sessions', sessionId, 'members'), snap => {
+      setMembers(snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(m => m.id !== currentMemberId)
+      );
+    });
+
+    return () => unsubMembers();
   }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     async function loadVenues() {
-      const vSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
-      const allVenues = vSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const nonTransport = allVenues.filter(v => v.name !== 'Transport' && !v.isTransport);
-      const transport = allVenues.find(v => v.name === 'Transport' || v.isTransport);
+      try {
+        const vSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues'));
+        const allVenues = vSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const nonTransport = allVenues.filter(v => v.name !== 'Transport' && !v.isTransport);
+        const transport = allVenues.find(v => v.name === 'Transport' || v.isTransport);
 
-      const sorted = [...nonTransport].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-      setVenues(sorted);
+        const sorted = [...nonTransport].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        setVenues(sorted);
 
-      const initial = {};
-      sorted.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
-      setVenuePayers(initial);
+        const initial = {};
+        sorted.forEach(v => { if (v.billPayer) initial[v.id] = v.billPayer; });
+        setVenuePayers(initial);
 
-      if (transport) {
-        setTransportVenueId(transport.id);
-        const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', transport.id, 'items'));
-        const items = iSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setTransportItems(items);
-        // Pre-fill per-cab payers if already set
-        const cabInitial = {};
-        items.forEach(item => { if (item.billPayer) cabInitial[item.id] = item.billPayer; });
-        if (Object.keys(cabInitial).length > 0) {
-          setCabPayers(cabInitial);
+        if (transport) {
+          setTransportVenueId(transport.id);
+          const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', transport.id, 'items'));
+          const items = iSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setTransportItems(items);
+          const cabInitial = {};
+          items.forEach(item => { if (item.billPayer) cabInitial[item.id] = item.billPayer; });
+          if (Object.keys(cabInitial).length > 0) {
+            setCabPayers(cabInitial);
+          }
         }
-      }
+      } catch (err) { console.error(err); }
     }
     loadVenues();
   }, [sessionId]);
@@ -127,13 +131,8 @@ export default function ShareSession() {
   async function handleAddMember() {
     const name = newName.trim();
     if (!name) return;
-    const ref = await addDoc(collection(db, 'sessions', sessionId, 'members'), {
+    await addDoc(collection(db, 'sessions', sessionId, 'members'), {
       name, joinedAt: serverTimestamp(), isCreator: false,
-    });
-    setMembers(prev => {
-      const updated = [...prev, { id: ref.id, name }];
-      sessionStorage.setItem(membersDraftKey(sessionId), JSON.stringify(updated));
-      return updated;
     });
     setNewName('');
     setTimeout(() => nameInputRef.current?.focus(), 50);
@@ -155,11 +154,6 @@ export default function ShareSession() {
 
   async function handleRemoveMember(memberId) {
     await deleteDoc(doc(db, 'sessions', sessionId, 'members', memberId));
-    setMembers(prev => {
-      const updated = prev.filter(m => m.id !== memberId);
-      sessionStorage.setItem(membersDraftKey(sessionId), JSON.stringify(updated));
-      return updated;
-    });
   }
 
   async function handleOpen() {
@@ -201,7 +195,6 @@ export default function ShareSession() {
           }
         }
       }
-      sessionStorage.removeItem(membersDraftKey(sessionId));
       sessionStorage.removeItem(`draft_confirm_${sessionId}`);
       navigate(`/session/${sessionId}/claim`);
     } catch (err) {

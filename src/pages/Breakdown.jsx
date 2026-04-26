@@ -246,7 +246,7 @@ export default function Breakdown() {
   }
 
   function handleCopyLink() {
-    navigator.clipboard.writeText(`https://unfuck.malik.codes/session/${sessionId}/breakdown`);
+    navigator.clipboard.writeText(`${window.location.origin}/session/${sessionId}/breakdown`);
     showToast('Copied!', 'success');
   }
 
