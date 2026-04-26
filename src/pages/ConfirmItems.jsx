@@ -450,105 +450,108 @@ export default function ConfirmItems() {
         </div>
       </div>
 
-      {venues
-        .map((venue, vi) => ({ venue, vi }))
-        .sort(({ venue: a }, { venue: b }) => {
-          if (a.name === 'Transport' || a.isTransport) return 1;
-          if (b.name === 'Transport' || b.isTransport) return -1;
-          return 0;
-        })
-        .map(({ venue, vi }) => {
-        const vParsed = venueTaxedTotal(venue);
-        const vReceipt = parseFloat(venue.userReceiptTotal) || 0;
-        const vDiff = Math.abs(vParsed - vReceipt);
-        const vDiffOk = vDiff < 0.005;
-        const isParsedVenue = (venue.receiptTotal ?? 0) > 0;
-        const allItemsValid = venue.items.length > 0 && venue.items.every(
-          item => item.name?.trim() && Number(item.quantity) > 0 && Number(item.unitPrice) > 0
-        );
-        const isVenueComplete = allItemsValid && (!isParsedVenue || vDiffOk);
-        return (
-          <Fragment key={vi}>
-            <div style={styles.venueBlock}>
-              <div style={styles.venueHeader}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={styles.venueHeaderText}>{venue.name}</span>
-                  {isVenueComplete && (
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <circle cx="8" cy="8" r="7" fill="#EAF3DE"/>
-                      <path d="M5 8L7 10L11 6" stroke="#27500A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+      {(() => {
+        const indexed = venues.map((venue, vi) => ({ venue, vi }));
+        const nonTransport = indexed.filter(({ venue }) => venue.name !== 'Transport' && !venue.isTransport);
+        const transport = indexed.filter(({ venue }) => venue.name === 'Transport' || venue.isTransport);
+        const renderEntry = ({ venue, vi }) => {
+          const vParsed = venueTaxedTotal(venue);
+          const vReceipt = parseFloat(venue.userReceiptTotal) || 0;
+          const vDiff = Math.abs(vParsed - vReceipt);
+          const vDiffOk = vDiff < 0.005;
+          const isParsedVenue = (venue.receiptTotal ?? 0) > 0;
+          const allItemsValid = venue.items.length > 0 && venue.items.every(
+            item => item.name?.trim() && Number(item.quantity) > 0 && Number(item.unitPrice) > 0
+          );
+          const isVenueComplete = allItemsValid && (!isParsedVenue || vDiffOk);
+          return (
+            <Fragment key={vi}>
+              <div style={styles.venueBlock}>
+                <div style={styles.venueHeader}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={styles.venueHeaderText}>{venue.name}</span>
+                    {isVenueComplete && (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <circle cx="8" cy="8" r="7" fill="#EAF3DE"/>
+                        <path d="M5 8L7 10L11 6" stroke="#27500A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </div>
+                  <span style={styles.venueEditHint}>Tap any item to edit</span>
+                </div>
+
+                {venue.items.map(item => (
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    isEditing={editingKey === `${vi}_${item.id}`}
+                    onToggleEdit={() => toggleEdit(vi, item.id)}
+                    onUpdate={(field, val) => updateItem(vi, item.id, field, val)}
+                    onEditChange={handleEditChange}
+                    onDelete={() => { deleteItem(vi, item.id); setEditingKey(null); }}
+                  />
+                ))}
+
+                <button style={styles.addItemLink} onClick={() => addItem(vi)}>
+                  + Add item to {venue.name}
+                </button>
+
+                <div style={styles.venueTotals}>
+                  <TotalRow label="Subtotal" value={venueSubtotal(venue)} />
+                  {venue.gst != null && (
+                    <TotalRow
+                      label={venue.gst.percent != null ? `GST (${venue.gst.percent}%)` : 'GST'}
+                      value={venueGstAmount(venue)}
+                    />
                   )}
-                </div>
-                <span style={styles.venueEditHint}>Tap any item to edit</span>
-              </div>
-
-              {venue.items.map(item => (
-                <ItemRow
-                  key={item.id}
-                  item={item}
-                  isEditing={editingKey === `${vi}_${item.id}`}
-                  onToggleEdit={() => toggleEdit(vi, item.id)}
-                  onUpdate={(field, val) => updateItem(vi, item.id, field, val)}
-                  onEditChange={handleEditChange}
-                  onDelete={() => { deleteItem(vi, item.id); setEditingKey(null); }}
-                />
-              ))}
-
-              <button style={styles.addItemLink} onClick={() => addItem(vi)}>
-                + Add item to {venue.name}
-              </button>
-
-              <div style={styles.venueTotals}>
-                <TotalRow label="Subtotal" value={venueSubtotal(venue)} />
-                {venue.gst != null && (
-                  <TotalRow
-                    label={venue.gst.percent != null ? `GST (${venue.gst.percent}%)` : 'GST'}
-                    value={venueGstAmount(venue)}
-                  />
-                )}
-                {venue.serviceCharge != null && (
-                  <TotalRow
-                    label={venue.serviceCharge.percent != null ? `Service charge (${venue.serviceCharge.percent}%)` : 'Service charge'}
-                    value={venueScAmount(venue)}
-                  />
-                )}
-                <TotalRow label="Total" value={venueTaxedTotal(venue)} bold />
-              </div>
-            </div>
-
-            {venue.name !== 'Transport' && !venue.isTransport && isParsedVenue && (
-              <div style={styles.compCard}>
-                <div style={styles.compRow}>
-                  <span style={styles.compLabel}>Parsed total</span>
-                  <span style={styles.compValue}>${vParsed.toFixed(2)}</span>
-                </div>
-                <div style={styles.compRow}>
-                  <span style={styles.compLabel}>Receipt total</span>
-                  <input
-                    style={styles.receiptInput}
-                    type="number"
-                    step="0.01"
-                    value={venue.userReceiptTotal}
-                    onChange={e => updateVenueReceiptTotal(vi, e.target.value)}
-                    placeholder="0.00"
-                  />
-                </div>
-                <div style={styles.compRow}>
-                  <span style={styles.compLabel}>Difference</span>
-                  <span style={{ ...styles.compDiff, color: vDiffOk ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                    {vDiffOk ? '✓' : '✗'} ${vDiff.toFixed(2)}
-                  </span>
+                  {venue.serviceCharge != null && (
+                    <TotalRow
+                      label={venue.serviceCharge.percent != null ? `Service charge (${venue.serviceCharge.percent}%)` : 'Service charge'}
+                      value={venueScAmount(venue)}
+                    />
+                  )}
+                  <TotalRow label="Total" value={venueTaxedTotal(venue)} bold />
                 </div>
               </div>
-            )}
-          </Fragment>
+
+              {venue.name !== 'Transport' && !venue.isTransport && isParsedVenue && (
+                <div style={styles.compCard}>
+                  <div style={styles.compRow}>
+                    <span style={styles.compLabel}>Parsed total</span>
+                    <span style={styles.compValue}>${vParsed.toFixed(2)}</span>
+                  </div>
+                  <div style={styles.compRow}>
+                    <span style={styles.compLabel}>Receipt total</span>
+                    <input
+                      style={styles.receiptInput}
+                      type="number"
+                      step="0.01"
+                      value={venue.userReceiptTotal}
+                      onChange={e => updateVenueReceiptTotal(vi, e.target.value)}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div style={styles.compRow}>
+                    <span style={styles.compLabel}>Difference</span>
+                    <span style={{ ...styles.compDiff, color: vDiffOk ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                      {vDiffOk ? '✓' : '✗'} ${vDiff.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </Fragment>
+          );
+        };
+        return (
+          <>
+            {nonTransport.map(renderEntry)}
+            <button style={styles.addVenueBtn} onClick={() => setAddVenueOpen(true)}>
+              + Add venue
+            </button>
+            {transport.map(renderEntry)}
+          </>
         );
-      })}
-
-      <button style={styles.addVenueBtn} onClick={() => setAddVenueOpen(true)}>
-        + Add venue
-      </button>
+      })()}
 
       {error && <p style={styles.error}>{error}</p>}
 

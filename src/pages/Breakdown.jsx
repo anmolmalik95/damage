@@ -40,6 +40,7 @@ export default function Breakdown() {
   const [billPayersSheetOpen, setBillPayersSheetOpen] = useState(false);
   const [venueBillPayers, setVenueBillPayers] = useState({});
   const [cabItemPayers, setCabItemPayers] = useState({});
+  const [settleUpExpanded, setSettleUpExpanded] = useState(false);
 
   useEffect(() => {
     document.title = session?.name ? `Breakdown · ${session.name} — Unfuck` : 'Unfuck';
@@ -302,6 +303,43 @@ export default function Breakdown() {
     }
   }
 
+  // Build raw per-venue/per-item debt edges (before simplification)
+  function buildRawDebts() {
+    if (!session.multiPayer) return [];
+    const rawDebts = [];
+    for (const { venue, memberData } of venueDataMap) {
+      const isTransport = venue.name === 'Transport' || venue.isTransport;
+      if (isTransport) {
+        for (const item of venue.items) {
+          const itemBillPayer = item.billPayer;
+          if (!itemBillPayer) continue;
+          const itemClaims = claims.filter(c => c.itemId === item.id);
+          for (const claim of itemClaims) {
+            if (claim.type === 'whole') {
+              const debtor = claim.memberId;
+              if (debtor === itemBillPayer) continue;
+              rawDebts.push({ debtorId: debtor, creditorId: itemBillPayer, amount: item.unitPrice ?? 0, label: item.name });
+            } else if (claim.type === 'shared') {
+              const share = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
+              for (const debtor of (claim.sharedWith || [])) {
+                if (debtor === itemBillPayer) continue;
+                rawDebts.push({ debtorId: debtor, creditorId: itemBillPayer, amount: share, label: item.name });
+              }
+            }
+          }
+        }
+      } else {
+        const vBillPayer = venue.billPayer;
+        if (!vBillPayer) continue;
+        for (const [memberId, data] of Object.entries(memberData)) {
+          if (memberId === vBillPayer) continue;
+          rawDebts.push({ debtorId: memberId, creditorId: vBillPayer, amount: data.total, label: venue.name });
+        }
+      }
+    }
+    return rawDebts;
+  }
+
   // Build debt transactions: single-payer or multi-payer debt graph
   function buildDebtTransactions() {
     if (!session.multiPayer) return [];
@@ -356,53 +394,21 @@ export default function Breakdown() {
   }
 
   const debtTransactions = buildDebtTransactions();
+  const rawDebts = session.multiPayer ? buildRawDebts() : [];
+  const sessionNettingOccurred = session.multiPayer && new Set(rawDebts.map(d => d.creditorId)).size > 1;
 
   const isDebug = new URLSearchParams(location.search).get('debug') === 'true';
 
   function buildDebugData() {
     if (!session.multiPayer) return null;
     const name = id => members.find(m => m.id === id)?.name ?? id;
+    const rawDebts = buildRawDebts();
 
-    const rawDebts = [];
     const netBalances = {};
-
-    for (const { venue, memberData } of venueDataMap) {
-      const isTransport = venue.name === 'Transport' || venue.isTransport;
-      if (isTransport) {
-        for (const item of venue.items) {
-          const itemBillPayer = item.billPayer;
-          if (!itemBillPayer) continue;
-          const itemClaims = claims.filter(c => c.itemId === item.id);
-          for (const claim of itemClaims) {
-            if (claim.type === 'whole') {
-              const debtor = claim.memberId;
-              if (debtor === itemBillPayer) continue;
-              const amount = item.unitPrice ?? 0;
-              rawDebts.push({ debtorId: debtor, creditorId: itemBillPayer, amount, label: item.name });
-              netBalances[debtor] = (netBalances[debtor] || 0) - amount;
-              netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + amount;
-            } else if (claim.type === 'shared') {
-              const share = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
-              for (const debtor of (claim.sharedWith || [])) {
-                if (debtor === itemBillPayer) continue;
-                rawDebts.push({ debtorId: debtor, creditorId: itemBillPayer, amount: share, label: item.name });
-                netBalances[debtor] = (netBalances[debtor] || 0) - share;
-                netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + share;
-              }
-            }
-          }
-        }
-      } else {
-        const vBillPayer = venue.billPayer;
-        if (!vBillPayer) continue;
-        for (const [memberId, data] of Object.entries(memberData)) {
-          if (memberId === vBillPayer) continue;
-          rawDebts.push({ debtorId: memberId, creditorId: vBillPayer, amount: data.total, label: venue.name });
-          netBalances[memberId] = (netBalances[memberId] || 0) - data.total;
-          netBalances[vBillPayer] = (netBalances[vBillPayer] || 0) + data.total;
-        }
-      }
-    }
+    rawDebts.forEach(d => {
+      netBalances[d.debtorId] = (netBalances[d.debtorId] || 0) - d.amount;
+      netBalances[d.creditorId] = (netBalances[d.creditorId] || 0) + d.amount;
+    });
 
     const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
     const finalTransactions = [];
@@ -454,48 +460,141 @@ export default function Breakdown() {
         </button>
       </div>
 
-      {/* Single-payer: Pay [Name] / You owe $X card */}
-      {!isReadOnly && !session.multiPayer && session.billPayer && currentMemberId !== session.billPayer && (
-        <div style={s.owesCard}>
-          <div style={s.owesPayName}>
-            Pay {members.find(m => m.id === session.billPayer)?.name ?? '?'}
-          </div>
-          {grandTotals[currentMemberId] != null && (
-            <div style={s.owesAmount}>
-              You owe ${grandTotals[currentMemberId].toFixed(2)}
+      {/* Single-payer: Settle up card */}
+      {!isReadOnly && !session.multiPayer && session.billPayer && currentMemberId !== session.billPayer && (() => {
+        const billPayer = members.find(m => m.id === session.billPayer);
+        const instr = billPayer?.paymentInstructions ?? session.paymentInstructions;
+        return (
+          <div style={s.owesCard}>
+            <div style={s.settleUpTitle}>Settle up</div>
+            <div style={s.payRow}>
+              <span style={s.payRowName}>Pay {billPayer?.name ?? '?'}</span>
+              <span style={s.payRowAmt}>${(grandTotals[currentMemberId] ?? 0).toFixed(2)}</span>
             </div>
-          )}
-          {(() => {
-            const payer = members.find(m => m.id === session.billPayer);
-            const instr = payer?.paymentInstructions ?? session.paymentInstructions;
-            return instr ? <div style={s.owesInstr}>💬 {instr}</div> : null;
-          })()}
-        </div>
-      )}
+            {instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
+          </div>
+        );
+      })()}
 
-      {/* Multi-payer: per-creditor debt cards or settled message */}
+      {/* Multi-payer: settle up card or settled message */}
       {!isReadOnly && session.multiPayer && (() => {
         const myTransactions = debtTransactions.filter(t => t.fromId === currentMemberId || t.toId === currentMemberId);
+        const myOwingTransactions = myTransactions.filter(t => t.fromId === currentMemberId);
+        const myCreditTransactions = myTransactions.filter(t => t.toId === currentMemberId);
+
         if (myTransactions.length === 0) {
           return (
             <div style={{ ...s.owesCard, marginBottom: '16px' }}>
-              <div style={s.owesPayName}>You're all settled ✓</div>
+              <div style={s.settleUpTitle}>You're all settled ✓</div>
               <div style={s.owesAmount}>No outstanding debts</div>
             </div>
           );
         }
-        return myTransactions.map((t, i) => {
-          const isOwing = t.fromId === currentMemberId;
-          const other = members.find(m => m.id === (isOwing ? t.toId : t.fromId));
-          const instr = other?.paymentInstructions;
-          return (
-            <div key={i} style={{ ...s.owesCard, marginBottom: '12px' }}>
-              <div style={s.owesPayName}>{isOwing ? `Pay ${other?.name ?? '?'}` : `${other?.name ?? '?'} owes you`}</div>
-              <div style={s.owesAmount}>{isOwing ? 'You owe' : "You're owed"} ${t.amount.toFixed(2)}</div>
-              {isOwing && instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
-            </div>
-          );
-        });
+
+        const myRawDebts = rawDebts.filter(d => d.debtorId === currentMemberId);
+        const myRawCreditorIds = new Set(myRawDebts.map(d => d.creditorId));
+        const nettingForMe = myOwingTransactions.length > 0 && (myRawCreditorIds.size > 1 || myOwingTransactions.some(t => !myRawCreditorIds.has(t.toId)));
+
+        return (
+          <>
+            {myOwingTransactions.length > 0 && (
+              <div style={{ ...s.owesCard, marginBottom: '12px' }}>
+                <div style={s.settleUpTitle}>Settle up</div>
+                {nettingForMe && <div style={s.settleUpSubline}>Simplified to fewest transfers</div>}
+                {myOwingTransactions.map((t, i) => {
+                  const creditor = members.find(m => m.id === t.toId);
+                  const instr = creditor?.paymentInstructions;
+                  return (
+                    <div key={i} style={i > 0 ? { marginTop: '8px' } : {}}>
+                      <div style={s.payRow}>
+                        <span style={s.payRowName}>Pay {creditor?.name ?? '?'}</span>
+                        <span style={s.payRowAmt}>${t.amount.toFixed(2)}</span>
+                      </div>
+                      {instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
+                    </div>
+                  );
+                })}
+                {nettingForMe && (
+                  <>
+                    <div style={s.settleUpDivider} />
+                    <button style={s.showCalcBtn} onClick={() => setSettleUpExpanded(x => !x)}>
+                      {settleUpExpanded ? 'Hide calculation ∨' : 'Show how this was calculated ›'}
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {settleUpExpanded && (
+                        <motion.div
+                          key="calc-expand"
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+                          style={{ overflow: 'hidden' }}
+                        >
+                          <div style={{ paddingTop: '12px' }}>
+                            <div style={s.calcSectionLabel}>How we got here:</div>
+                            <div style={s.calcSubLabel}>What you actually owe per venue:</div>
+                            {myRawDebts.map((d, i) => {
+                              const creditorName = members.find(m => m.id === d.creditorId)?.name ?? '?';
+                              return (
+                                <div key={i} style={s.calcRow}>
+                                  <span style={s.calcRowLabel}>{d.label} (owed to {creditorName})</span>
+                                  <span style={s.calcRowAmt}>${d.amount.toFixed(2)}</span>
+                                </div>
+                              );
+                            })}
+                            <div style={{ ...s.calcRow, borderTop: '0.5px solid var(--border-color)', marginTop: '4px', paddingTop: '6px' }}>
+                              <span style={{ ...s.calcRowLabel, fontWeight: 500 }}>Total owed</span>
+                              <span style={{ ...s.calcRowAmt, fontWeight: 500 }}>${myRawDebts.reduce((sum, d) => sum + d.amount, 0).toFixed(2)}</span>
+                            </div>
+                            <div style={{ ...s.calcSubLabel, marginTop: '12px' }}>Simplification applied:</div>
+                            {(() => {
+                              const finalCreditorIds = new Set(myOwingTransactions.map(t => t.toId));
+                              const absorbedNames = [...myRawCreditorIds].filter(id => !finalCreditorIds.has(id)).map(id => members.find(m => m.id === id)?.name ?? '?');
+                              const finalCreditorNames = myOwingTransactions.map(t => members.find(m => m.id === t.toId)?.name ?? '?');
+                              const rawCount = myRawDebts.length;
+                              const finalCount = myOwingTransactions.length;
+                              const explanation = absorbedNames.length > 0 && finalCount === 1
+                                ? `${absorbedNames.join(' & ')}'s payment absorbed into ${finalCreditorNames[0]}'s to reduce total transfers needed.`
+                                : `Your ${rawCount} separate transfer${rawCount !== 1 ? 's' : ''} consolidated into ${finalCount}.`;
+                              return (
+                                <>
+                                  <div style={s.calcExplain}>Instead of {rawCount} transfer{rawCount !== 1 ? 's' : ''} → {finalCount} transfer{finalCount !== 1 ? 's' : ''}</div>
+                                  <div style={s.calcExplain}>{explanation}</div>
+                                </>
+                              );
+                            })()}
+                            <div style={{ ...s.calcSubLabel, marginTop: '12px' }}>Net result:</div>
+                            {myOwingTransactions.map((t, i) => {
+                              const creditorName = members.find(m => m.id === t.toId)?.name ?? '?';
+                              return (
+                                <div key={i} style={s.calcRow}>
+                                  <span style={s.calcRowLabel}>Pay {creditorName}</span>
+                                  <span style={s.calcRowAmt}>${t.amount.toFixed(2)}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </>
+                )}
+              </div>
+            )}
+            {myCreditTransactions.map((t, i) => {
+              const debtor = members.find(m => m.id === t.fromId);
+              return (
+                <div key={i} style={{ ...s.owesCard, marginBottom: '12px' }}>
+                  <div style={s.settleUpTitle}>{debtor?.name ?? '?'} owes you</div>
+                  <div style={s.payRow}>
+                    <span style={s.payRowName}>You're owed</span>
+                    <span style={s.payRowAmt}>${t.amount.toFixed(2)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        );
       })()}
 
       {/* Payment instructions — for admin/bill payer editing, or read-only users */}
@@ -531,6 +630,13 @@ export default function Breakdown() {
           </div>
         </div>
       ) : null}
+
+      {/* Helper text when netting occurred */}
+      {sessionNettingOccurred && (
+        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' }}>
+          Amounts show what each person consumed. See your 'Settle up' card above for what to transfer.
+        </div>
+      )}
 
       {/* Person cards — one per member, all venues combined */}
       {members.map(member => {
@@ -968,6 +1074,15 @@ export default function Breakdown() {
                 </div>
               );
             })}
+
+            <div style={s.debugSection}>Netting stats:</div>
+            {session.multiPayer && debugData ? (
+              <>
+                <div style={s.debugRow}>Netting occurred: {new Set(debugData.rawDebts.map(d => d.creditorId)).size > 1 ? 'YES' : 'NO'}</div>
+                <div style={s.debugRow}>Number of raw creditors: {new Set(debugData.rawDebts.map(d => d.creditorId)).size}</div>
+                <div style={s.debugRow}>Number of final transactions: {debtTransactions.length}</div>
+              </>
+            ) : <div style={s.debugRow}>— single-payer session —</div>}
           </div>
         );
       })()}
@@ -1055,6 +1170,19 @@ const s = {
   sheetTitle: { fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
   sheetBody: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '20px', lineHeight: 1.5 },
   sheetBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'block' },
+  settleUpTitle: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
+  settleUpSubline: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '10px', marginTop: '-4px' },
+  payRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  payRowName: { fontSize: '15px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  payRowAmt: { fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  settleUpDivider: { borderTop: '0.5px solid var(--border-color)', margin: '12px 0 8px' },
+  showCalcBtn: { background: 'none', border: 'none', fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', padding: '0', textAlign: 'left' },
+  calcSectionLabel: { fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
+  calcSubLabel: { fontSize: '11px', fontWeight: 500, color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '4px' },
+  calcRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' },
+  calcRowLabel: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flex: 1, paddingRight: '8px' },
+  calcRowAmt: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
+  calcExplain: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1.4, marginTop: '2px' },
   debugPanel: { marginTop: '32px', padding: '16px', backgroundColor: '#0a0a0a', borderRadius: '10px', border: '1px solid #333' },
   debugTitle: { fontSize: '11px', fontWeight: 700, color: '#a0f0a0', fontFamily: 'monospace', letterSpacing: '0.1em', marginBottom: '8px' },
   debugDivider: { height: '1px', backgroundColor: '#333', marginBottom: '12px' },
