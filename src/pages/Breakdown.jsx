@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigation } from '../context/NavigationContext';
 import { useToast } from '../context/ToastContext';
 import SkeletonBlock from '../components/SkeletonBlock';
 import {
@@ -15,6 +16,7 @@ export default function Breakdown() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { navigateBack } = useNavigation();
   const { showToast } = useToast();
 
   const currentMemberId = localStorage.getItem(`member_${sessionId}`);
@@ -441,7 +443,11 @@ export default function Breakdown() {
     <PageContainer>
       {/* Header */}
       <div style={s.header}>
-        <button style={s.back} onClick={() => navigate(location.state?.from === 'claim' ? `/session/${sessionId}/claim` : '/existing-sessions')}>←</button>
+        <button style={s.back} onClick={() => {
+          if (location.state?.from === 'claim') navigateBack(`/session/${sessionId}/claim`);
+          else if (location.state?.from === 'who-are-you') navigateBack(`/s/${sessionId}`);
+          else navigateBack('/existing-sessions');
+        }}>←</button>
         <div style={s.headerText}>
           <div style={s.title}>Bill breakdown</div>
           <div style={s.subtitle}>{session.name} · ${totalBill.toFixed(2)}</div>

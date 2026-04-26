@@ -23,6 +23,7 @@ import ExistingSessions from './pages/ExistingSessions';
 import MyClaimsScreen from './pages/MyClaimsScreen';
 import ReceiptsScreen from './pages/ReceiptsScreen';
 import EditItems from './pages/EditItems';
+import ParsingScreen from './pages/ParsingScreen';
 
 function AppRoutes() {
   const location = useLocation();
@@ -33,6 +34,7 @@ function AppRoutes() {
         <Route path="/session/new" element={<NewSession />} />
         <Route path="/session/:sessionId" element={<SessionView />} />
         <Route path="/session/:sessionId/upload" element={<UploadReceipts />} />
+        <Route path="/session/:sessionId/parsing" element={<ParsingScreen />} />
         <Route path="/session/:sessionId/confirm" element={<ConfirmItems />} />
         <Route path="/session/:sessionId/share" element={<ShareSession />} />
         <Route path="/session/:sessionId/joining" element={<JoiningScreen />} />

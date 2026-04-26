@@ -172,11 +172,8 @@ export default function MyClaimsScreen() {
       )}
 
       <div style={st.btnWrap}>
-        <button style={st.editBtn} onClick={() => navigateBack(`/session/${sessionId}/claim`)}>
+        <button style={st.editBtn} onClick={handleStillClaiming}>
           Edit claims
-        </button>
-        <button style={st.stillBtn} onClick={handleStillClaiming}>
-          Still claiming
         </button>
       </div>
     </PageContainer>
@@ -201,6 +198,5 @@ const st = {
   totalAmt: { color: 'var(--text-primary)' },
   totalNote: { fontWeight: 400, color: 'var(--text-tertiary)' },
   btnWrap: { marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' },
-  editBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', border: 'none', borderRadius: '8px', cursor: 'pointer' },
-  stillBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', cursor: 'pointer' },
+  editBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)', border: 'none', borderRadius: '8px', cursor: 'pointer' },
 };

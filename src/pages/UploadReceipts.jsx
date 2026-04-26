@@ -5,6 +5,8 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage
 import { db, storage } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import { useIsDesktop } from '../hooks/useIsDesktop';
+import { useNavigation } from '../context/NavigationContext';
+import { setPendingParse } from '../utils/parseState';
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -37,6 +39,7 @@ const emptyVenue = () => ({ name: '', photos: [], manualItems: [] });
 export default function UploadReceipts() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
+  const { navigateForward } = useNavigation();
   const isDesktop = useIsDesktop();
   const [session, setSession] = useState(null);
 
@@ -50,7 +53,6 @@ export default function UploadReceipts() {
     return [emptyVenue()];
   });
   const [cabs, setCabs] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -161,7 +163,7 @@ export default function UploadReceipts() {
     ));
   }
 
-  async function handleParse() {
+  function handleParse() {
     const hasPhoto = venues.some(v => v.name.trim() && v.photos.length > 0);
     const hasManual = venues.some(v => v.name.trim() && v.manualItems.some(i => i.name.trim()));
     const hasValidCabs = cabs.some(c => parseFloat(c.price) > 0);
@@ -170,11 +172,44 @@ export default function UploadReceipts() {
       return;
     }
     setError('');
-    setLoading(true);
 
-    try {
+    // All manual (no photos): build result inline and skip ParsingScreen
+    if (!hasPhoto) {
+      const parsed = { venues: [] };
+      for (const venue of venues) {
+        if (!venue.name.trim()) continue;
+        const validManual = venue.manualItems.filter(i => i.name.trim());
+        if (!validManual.length) continue;
+        parsed.venues.push({
+          name: venue.name.trim(),
+          venueName: venue.name.trim(),
+          items: validManual.map(i => ({
+            name: i.name.trim(),
+            quantity: Math.max(1, parseInt(i.qty) || 1),
+            unitPrice: parseFloat(i.price) || 0,
+          })),
+        });
+      }
+      if (hasValidCabs) {
+        const validCabs = cabs.filter(c => parseFloat(c.price) > 0);
+        const cabItems = validCabs.map(c => ({ name: cabName(c), quantity: 1, unitPrice: parseFloat(c.price) || 0 }));
+        const existing = parsed.venues.find(v => v.venueName === 'Transport');
+        if (existing) existing.items = [...existing.items, ...cabItems];
+        else parsed.venues.push({ name: 'Transport', venueName: 'Transport', items: cabItems });
+      }
+      sessionStorage.setItem(`canRestore_upload_${sessionId}`, 'true');
+      sessionStorage.setItem(`canRestore_confirm_${sessionId}`, 'true');
+      navigateForward(`/session/${sessionId}/confirm`, {
+        state: { parsed, venueNames: venues.map(v => v.name.trim()) },
+      });
+      return;
+    }
+
+    // Has photos: start full pipeline as a promise, navigate to ParsingScreen immediately
+    const abortController = new AbortController();
+
+    const parsePromise = (async () => {
       const venuesWithPhotos = venues.filter(v => v.name.trim() && v.photos.length > 0);
-
       const cappedVenues = await Promise.all(
         venuesWithPhotos.map(async venue => ({
           ...venue,
@@ -182,51 +217,38 @@ export default function UploadReceipts() {
         }))
       );
 
-      const apiPromise = hasPhoto
-        ? (async () => {
-            const venuePayloads = await Promise.all(
-              cappedVenues.map(async venue => {
-                const photos = await Promise.all(venue.cappedPhotos.map(fileToBase64));
-                return { venueName: venue.name.trim(), photos };
-              })
-            );
-            const apiUrl = import.meta.env.DEV
-              ? 'http://localhost:3001/api/parse-receipt'
-              : '/api/parse-receipt';
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 55000);
-            let res;
-            try {
-              res = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionId, venues: venuePayloads }),
-                signal: controller.signal,
-              });
-            } catch (err) {
-              clearTimeout(timeoutId);
-              if (err.name === 'AbortError') throw new Error('Request timed out — please try again with fewer or smaller photos');
-              throw err;
-            }
-            clearTimeout(timeoutId);
-            if (!res.ok) {
-              const errorData = await res.json().catch(() => ({}));
-              throw new Error(errorData.error || `Server error: ${res.status}`);
-            }
-            return res.json();
-          })().catch(err => { throw Object.assign(err, { _source: 'api' }); })
-        : Promise.resolve({ venues: [] });
+      const venuePayloads = await Promise.all(
+        cappedVenues.map(async venue => {
+          const photos = await Promise.all(venue.cappedPhotos.map(fileToBase64));
+          return { venueName: venue.name.trim(), photos };
+        })
+      );
 
-      let apiResult;
+      const apiUrl = import.meta.env.DEV
+        ? 'http://localhost:3001/api/parse-receipt'
+        : '/api/parse-receipt';
+
+      const timeoutId = setTimeout(() => abortController.abort(), 55000);
+      let res;
       try {
-        apiResult = await apiPromise;
+        res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, venues: venuePayloads }),
+          signal: abortController.signal,
+        });
       } catch (err) {
-        setError(err.message || 'Something went wrong. Please try again.');
-        console.error(err);
-        setLoading(false);
-        return;
+        clearTimeout(timeoutId);
+        throw err;
+      }
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server error: ${res.status}`);
       }
 
+      const apiResult = await res.json();
       let parsed = apiResult;
 
       // Merge manual items
@@ -250,24 +272,11 @@ export default function UploadReceipts() {
       // Add cabs as Transport venue
       if (hasValidCabs) {
         const validCabs = cabs.filter(c => parseFloat(c.price) > 0);
-        const cabItems = validCabs.map(c => ({
-          name: cabName(c),
-          quantity: 1,
-          unitPrice: parseFloat(c.price) || 0,
-        }));
+        const cabItems = validCabs.map(c => ({ name: cabName(c), quantity: 1, unitPrice: parseFloat(c.price) || 0 }));
         const existing = parsed.venues?.find(v => (v.venueName || v.name) === 'Transport');
-        if (existing) {
-          existing.items = [...(existing.items ?? []), ...cabItems];
-        } else {
-          parsed.venues = [...(parsed.venues ?? []), { name: 'Transport', venueName: 'Transport', items: cabItems }];
-        }
+        if (existing) existing.items = [...(existing.items ?? []), ...cabItems];
+        else parsed.venues = [...(parsed.venues ?? []), { name: 'Transport', venueName: 'Transport', items: cabItems }];
       }
-
-      sessionStorage.setItem(`canRestore_upload_${sessionId}`, 'true');
-      sessionStorage.setItem(`canRestore_confirm_${sessionId}`, 'true');
-      navigate(`/session/${sessionId}/confirm`, {
-        state: { parsed, venueNames: venues.map(v => v.name.trim()) },
-      });
 
       // Background storage upload — non-blocking
       if (cappedVenues.length > 0) {
@@ -294,11 +303,12 @@ export default function UploadReceipts() {
           }
         })();
       }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
-      console.error(err);
-      setLoading(false);
-    }
+
+      return { parsed, venueNames: venues.map(v => v.name.trim()) };
+    })();
+
+    setPendingParse({ promise: parsePromise, abortController });
+    navigateForward(`/session/${sessionId}/parsing`);
   }
 
   const formattedDate = session?.date
@@ -306,17 +316,8 @@ export default function UploadReceipts() {
     : '';
 
   const parseBtn = (
-    <button
-      style={{ ...styles.btnPrimary, opacity: loading ? 0.7 : 1 }}
-      onClick={handleParse}
-      disabled={loading}
-    >
-      {loading ? (
-        <>
-          <span className="spinner" />
-          Reading your receipt...
-        </>
-      ) : 'Continue →'}
+    <button style={styles.btnPrimary} onClick={handleParse}>
+      Continue →
     </button>
   );
 

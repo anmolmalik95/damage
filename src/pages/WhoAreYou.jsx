@@ -94,7 +94,7 @@ export default function WhoAreYou() {
     localStorage.setItem(`memberName_${sessionId}`, member.name);
 
     if (session?.status === 'locked' || session?.status === 'closed' || location.state?.returnTo === 'breakdown') {
-      navigateForward(`/session/${sessionId}/breakdown`);
+      navigateForward(`/session/${sessionId}/breakdown`, { state: { from: 'who-are-you' } });
       return;
     }
 
