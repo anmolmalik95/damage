@@ -356,6 +356,73 @@ export default function Breakdown() {
 
   const debtTransactions = buildDebtTransactions();
 
+  const isDebug = new URLSearchParams(location.search).get('debug') === 'true';
+
+  function buildDebugData() {
+    if (!session.multiPayer) return null;
+    const name = id => members.find(m => m.id === id)?.name ?? id;
+
+    const rawDebts = [];
+    const netBalances = {};
+
+    for (const { venue, memberData } of venueDataMap) {
+      const isTransport = venue.name === 'Transport' || venue.isTransport;
+      if (isTransport) {
+        for (const item of venue.items) {
+          const itemBillPayer = item.billPayer;
+          if (!itemBillPayer) continue;
+          const itemClaims = claims.filter(c => c.itemId === item.id);
+          for (const claim of itemClaims) {
+            if (claim.type === 'whole') {
+              const debtor = claim.memberId;
+              if (debtor === itemBillPayer) continue;
+              const amount = item.unitPrice ?? 0;
+              rawDebts.push({ debtorId: debtor, creditorId: itemBillPayer, amount, label: item.name });
+              netBalances[debtor] = (netBalances[debtor] || 0) - amount;
+              netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + amount;
+            } else if (claim.type === 'shared') {
+              const share = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
+              for (const debtor of (claim.sharedWith || [])) {
+                if (debtor === itemBillPayer) continue;
+                rawDebts.push({ debtorId: debtor, creditorId: itemBillPayer, amount: share, label: item.name });
+                netBalances[debtor] = (netBalances[debtor] || 0) - share;
+                netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + share;
+              }
+            }
+          }
+        }
+      } else {
+        const vBillPayer = venue.billPayer;
+        if (!vBillPayer) continue;
+        for (const [memberId, data] of Object.entries(memberData)) {
+          if (memberId === vBillPayer) continue;
+          rawDebts.push({ debtorId: memberId, creditorId: vBillPayer, amount: data.total, label: venue.name });
+          netBalances[memberId] = (netBalances[memberId] || 0) - data.total;
+          netBalances[vBillPayer] = (netBalances[vBillPayer] || 0) + data.total;
+        }
+      }
+    }
+
+    const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
+    const finalTransactions = [];
+    for (let i = 0; i < 500; i++) {
+      const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
+      const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
+      if (creditor.bal < 0.005 || debtor.bal > -0.005) break;
+      const amount = Math.min(creditor.bal, -debtor.bal);
+      finalTransactions.push({ fromId: debtor.id, toId: creditor.id, amount: Math.round(amount * 100) / 100 });
+      creditor.bal -= amount;
+      debtor.bal += amount;
+    }
+
+    const rawDebtOwed = {};
+    rawDebts.forEach(d => { rawDebtOwed[d.debtorId] = (rawDebtOwed[d.debtorId] || 0) + d.amount; });
+
+    return { rawDebts, netBalances, finalTransactions, rawDebtOwed, name };
+  }
+
+  const debugData = isDebug ? buildDebugData() : null;
+
   const memberIndex = Object.fromEntries(members.map((m, i) => [m.id, i]));
   const sortedVenueDataMap = [...venueDataMap].sort((a, b) => {
     const ao = a.venue.order ?? (a.venue.isTransport || a.venue.name === 'Transport' ? 9999 : 0);
@@ -854,6 +921,60 @@ export default function Breakdown() {
           </div>
         </>
       )}
+
+      {/* Debug panel — only visible when ?debug=true */}
+      {isDebug && (() => {
+        const name = id => members.find(m => m.id === id)?.name ?? id;
+        return (
+          <div style={s.debugPanel}>
+            <div style={s.debugTitle}>DEBT GRAPH DEBUG</div>
+            <div style={s.debugDivider} />
+
+            <div style={s.debugSection}>Raw debts before netting:</div>
+            {session.multiPayer && debugData ? (
+              debugData.rawDebts.length === 0
+                ? <div style={s.debugRow}>— none —</div>
+                : debugData.rawDebts.map((d, i) => (
+                    <div key={i} style={s.debugRow}>
+                      {name(d.debtorId)} owes {name(d.creditorId)} ${d.amount.toFixed(2)} for {d.label}
+                    </div>
+                  ))
+            ) : <div style={s.debugRow}>— single-payer session —</div>}
+
+            <div style={s.debugSection}>After netting:</div>
+            {session.multiPayer && debugData ? (
+              Object.keys(debugData.netBalances).length === 0
+                ? <div style={s.debugRow}>— no balances —</div>
+                : Object.entries(debugData.netBalances).map(([id, bal]) => (
+                    <div key={id} style={s.debugRow}>
+                      {name(id)}: {bal >= 0 ? `+$${bal.toFixed(2)} (owed to them)` : `-$${Math.abs(bal).toFixed(2)} (they owe)`}
+                    </div>
+                  ))
+            ) : <div style={s.debugRow}>— n/a —</div>}
+
+            <div style={s.debugSection}>Final transactions:</div>
+            {debtTransactions.length === 0
+              ? <div style={s.debugRow}>— none —</div>
+              : debtTransactions.map((t, i) => (
+                  <div key={i} style={s.debugRow}>
+                    {name(t.fromId)} pays {name(t.toId)} ${t.amount.toFixed(2)}
+                  </div>
+                ))}
+
+            <div style={s.debugSection}>Grand total check:</div>
+            {members.filter(m => grandTotals[m.id] != null).map(m => {
+              const cardTotal = grandTotals[m.id] ?? 0;
+              const rawOwed = debugData?.rawDebtOwed?.[m.id] ?? 0;
+              const match = Math.abs(cardTotal - rawOwed) < 0.02;
+              return (
+                <div key={m.id} style={s.debugRow}>
+                  {m.name}: card ${cardTotal.toFixed(2)} = raw debts ${rawOwed.toFixed(2)} {match ? '✓' : '✗'}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
     </PageContainer>
   );
 }
@@ -938,4 +1059,9 @@ const s = {
   sheetTitle: { fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
   sheetBody: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '20px', lineHeight: 1.5 },
   sheetBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'block' },
+  debugPanel: { marginTop: '32px', padding: '16px', backgroundColor: '#0a0a0a', borderRadius: '10px', border: '1px solid #333' },
+  debugTitle: { fontSize: '11px', fontWeight: 700, color: '#a0f0a0', fontFamily: 'monospace', letterSpacing: '0.1em', marginBottom: '8px' },
+  debugDivider: { height: '1px', backgroundColor: '#333', marginBottom: '12px' },
+  debugSection: { fontSize: '11px', fontWeight: 600, color: '#888', fontFamily: 'monospace', marginTop: '12px', marginBottom: '4px' },
+  debugRow: { fontSize: '11px', color: '#d0d0d0', fontFamily: 'monospace', lineHeight: 1.8, paddingLeft: '8px' },
 };
