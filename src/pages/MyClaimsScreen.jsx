@@ -20,7 +20,7 @@ export default function MyClaimsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    document.title = sessionName ? `My claims · ${sessionName} — Unfuck` : 'Unfuck';
+    document.title = sessionName ? `My claims · ${sessionName} — Damage` : 'Damage';
   }, [sessionName]);
 
   useEffect(() => {

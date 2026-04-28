@@ -24,7 +24,7 @@ export default function MapPeople() {
   const [confirmedGroups, setConfirmedGroups] = useState([]);
   const confirmedGroupsRef = useRef([]);
 
-  useEffect(() => { document.title = 'Reconcile — Unfuck'; }, []);
+  useEffect(() => { document.title = 'Reconcile — Damage'; }, []);
 
   useEffect(() => {
     if (!sessionIds.length) { navigate('/reconcile', { replace: true }); return; }

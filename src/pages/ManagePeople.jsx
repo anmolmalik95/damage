@@ -119,7 +119,7 @@ export default function ManagePeople() {
   }
 
   useEffect(() => {
-    document.title = session?.name ? `Manage people · ${session.name} — Unfuck` : 'Unfuck';
+    document.title = session?.name ? `Manage people · ${session.name} — Damage` : 'Damage';
   }, [session?.name]);
 
   if (loading) return (

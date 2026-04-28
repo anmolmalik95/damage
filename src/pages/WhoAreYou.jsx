@@ -112,7 +112,7 @@ export default function WhoAreYou() {
   }
 
   useEffect(() => {
-    document.title = session?.name ? `${session.name} — Unfuck` : 'Unfuck';
+    document.title = session?.name ? `${session.name} — Damage` : 'Damage';
   }, [session?.name]);
 
   const formattedDate = session?.date

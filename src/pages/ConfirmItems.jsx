@@ -148,7 +148,7 @@ export default function ConfirmItems() {
   }, [sheetEditingKey]);
 
   useEffect(() => {
-    document.title = session?.name ? `Confirm items · ${session.name} — Unfuck` : 'Unfuck';
+    document.title = session?.name ? `Confirm items · ${session.name} — Damage` : 'Damage';
   }, [session?.name]);
 
   useEffect(() => {

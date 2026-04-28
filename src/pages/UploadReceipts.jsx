@@ -63,7 +63,7 @@ export default function UploadReceipts() {
   }, [sessionId]);
 
   useEffect(() => {
-    document.title = session?.name ? `Add receipts · ${session.name} — Unfuck` : 'Unfuck';
+    document.title = session?.name ? `Add receipts · ${session.name} — Damage` : 'Damage';
   }, [session?.name]);
 
   function saveVenuesDraft(updated) {

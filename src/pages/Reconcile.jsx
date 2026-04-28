@@ -13,7 +13,7 @@ export default function Reconcile() {
   const [error, setError] = useState('');
   const [continuing, setContinuing] = useState(false);
 
-  useEffect(() => { document.title = 'Reconcile — Unfuck'; }, []);
+  useEffect(() => { document.title = 'Reconcile — Damage'; }, []);
 
   useEffect(() => {
     async function load() {

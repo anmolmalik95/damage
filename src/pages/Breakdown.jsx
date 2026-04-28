@@ -45,7 +45,7 @@ export default function Breakdown() {
   const [settleUpExpanded, setSettleUpExpanded] = useState(false);
 
   useEffect(() => {
-    document.title = session?.name ? `Breakdown · ${session.name} — Unfuck` : 'Unfuck';
+    document.title = session?.name ? `Breakdown · ${session.name} — Damage` : 'Damage';
   }, [session?.name]);
 
   useEffect(() => {

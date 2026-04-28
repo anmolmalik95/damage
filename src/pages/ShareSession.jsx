@@ -40,7 +40,7 @@ export default function ShareSession() {
   const { showToast } = useToast();
 
   useEffect(() => {
-    document.title = session?.name ? `Share · ${session.name} — Unfuck` : 'Unfuck';
+    document.title = session?.name ? `Share · ${session.name} — Damage` : 'Damage';
   }, [session?.name]);
 
   useEffect(() => {

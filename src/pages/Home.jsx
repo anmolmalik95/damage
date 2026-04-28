@@ -6,11 +6,11 @@ export default function Home() {
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
 
-  useEffect(() => { document.title = 'Unfuck'; }, []);
+  useEffect(() => { document.title = 'Damage'; }, []);
 
   return (
     <div style={styles.container}>
-      <h1 style={{ ...styles.wordmark, fontSize: isDesktop ? '96px' : '72px' }}>UNFUCK</h1>
+      <h1 style={{ ...styles.wordmark, fontSize: isDesktop ? '96px' : '72px' }}>DAMAGE</h1>
       <p style={styles.tagline}>Split the bill. No ambiguity.</p>
       <div style={styles.actions}>
         <button style={styles.btnPrimary} onClick={() => navigate('/session/new')}>

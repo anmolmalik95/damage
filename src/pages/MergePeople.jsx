@@ -17,7 +17,7 @@ export default function MergePeople() {
   const [intoMember, setIntoMember] = useState(null);
 
   useEffect(() => {
-    document.title = sessionName ? `Merge people · ${sessionName} — Unfuck` : 'Unfuck';
+    document.title = sessionName ? `Merge people · ${sessionName} — Damage` : 'Damage';
   }, [sessionName]);
   const [fromClaims, setFromClaims] = useState([]);
   const [intoClaims, setIntoClaims] = useState([]);

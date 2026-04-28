@@ -72,7 +72,7 @@ export default function NewSession() {
   const eventPlaceholder = useMemo(() => pick(EVENT_PLACEHOLDERS), []);
   const namePlaceholder = useMemo(() => pick(NAME_PLACEHOLDERS), []);
 
-  useEffect(() => { document.title = 'New session — Unfuck'; }, []);
+  useEffect(() => { document.title = 'New session — Damage'; }, []);
 
 
   // Persist every keystroke to draft

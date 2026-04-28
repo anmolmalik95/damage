@@ -22,7 +22,7 @@ export default function JoiningScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    document.title = sessionName ? `${sessionName} — Unfuck` : 'Unfuck';
+    document.title = sessionName ? `${sessionName} — Damage` : 'Damage';
   }, [sessionName]);
 
   useEffect(() => {

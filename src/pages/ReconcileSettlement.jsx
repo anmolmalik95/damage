@@ -36,7 +36,7 @@ export default function ReconcileSettlement() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => { document.title = 'Reconcile — Unfuck'; }, []);
+  useEffect(() => { document.title = 'Reconcile — Damage'; }, []);
 
   useEffect(() => {
     async function loadFromState(stateSessions, stateGroups, stateNames) {

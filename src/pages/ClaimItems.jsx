@@ -74,7 +74,7 @@ export default function ClaimItems() {
   const { showToast } = useToast();
 
   useEffect(() => {
-    document.title = session?.name ? `Claiming · ${session.name} — Unfuck` : 'Unfuck';
+    document.title = session?.name ? `Claiming · ${session.name} — Damage` : 'Damage';
   }, [session?.name]);
 
   // Redirect if no identity

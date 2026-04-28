@@ -20,7 +20,7 @@ export default function Resolve() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    document.title = sessionName ? `Resolve · ${sessionName} — Unfuck` : 'Unfuck';
+    document.title = sessionName ? `Resolve · ${sessionName} — Damage` : 'Damage';
   }, [sessionName]);
 
   useEffect(() => {

@@ -35,7 +35,7 @@ export default function ReceiptsScreen() {
   }, [sessionId]);
 
   useEffect(() => {
-    document.title = sessionName ? `Receipts · ${sessionName} — Unfuck` : 'Unfuck';
+    document.title = sessionName ? `Receipts · ${sessionName} — Damage` : 'Damage';
   }, [sessionName]);
 
   useEffect(() => {

@@ -26,7 +26,7 @@ export default function ExistingSessions() {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { document.title = 'Sessions — Unfuck'; }, []);
+  useEffect(() => { document.title = 'Sessions — Damage'; }, []);
 
   useEffect(() => {
     async function load() {
