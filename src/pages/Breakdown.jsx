@@ -587,18 +587,22 @@ export default function Breakdown() {
                 )}
               </div>
             )}
-            {myCreditTransactions.map((t, i) => {
-              const debtor = members.find(m => m.id === t.fromId);
-              return (
-                <div key={i} style={{ ...s.owesCard, marginBottom: '12px' }}>
-                  <div style={s.settleUpTitle}>{debtor?.name ?? '?'} owes you</div>
-                  <div style={s.payRow}>
-                    <span style={s.payRowName}>You're owed</span>
-                    <span style={s.payRowAmt}>${t.amount.toFixed(2)}</span>
-                  </div>
-                </div>
-              );
-            })}
+            {myCreditTransactions.length > 0 && (
+              <div style={{ ...s.owesCard, marginBottom: '12px' }}>
+                <div style={s.settleUpTitle}>You're owed</div>
+                {[...myCreditTransactions]
+                  .sort((a, b) => b.amount - a.amount)
+                  .map((t, i) => {
+                    const debtor = members.find(m => m.id === t.fromId);
+                    return (
+                      <div key={i} style={{ ...s.payRow, ...(i > 0 ? { marginTop: '8px' } : {}) }}>
+                        <span style={s.payRowName}>{debtor?.name ?? '?'}</span>
+                        <span style={s.payRowAmt}>${t.amount.toFixed(2)}</span>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </>
         );
       })()}
