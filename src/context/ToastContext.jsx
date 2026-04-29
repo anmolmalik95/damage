@@ -11,11 +11,15 @@ const variantStyles = {
 function ToastStack({ toasts }) {
   if (!toasts.length) return null;
   return (
-    <div style={{
-      position: 'fixed', bottom: '28px', left: '50%', transform: 'translateX(-50%)',
-      display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center',
-      zIndex: 9999, pointerEvents: 'none',
-    }}>
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed', bottom: '28px', left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center',
+        zIndex: 9999, pointerEvents: 'none',
+      }}
+    >
       {toasts.map(t => (
         <div
           key={t.id}

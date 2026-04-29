@@ -67,12 +67,14 @@ export default function Breakdown() {
   useEffect(() => {
     const unsubs = [
       onSnapshot(doc(db, 'sessions', sessionId), snap => {
-        if (snap.exists()) {
-          const data = snap.data();
-          setSession({ id: snap.id, ...data });
-          setPaymentInstructions(data.paymentInstructions ?? '');
-          if (!loadStateRef.current.session) { loadStateRef.current.session = true; checkLoaded(); }
+        if (!snap.exists()) {
+          navigate('/', { replace: true });
+          return;
         }
+        const data = snap.data();
+        setSession({ id: snap.id, ...data });
+        setPaymentInstructions(data.paymentInstructions ?? '');
+        if (!loadStateRef.current.session) { loadStateRef.current.session = true; checkLoaded(); }
       }),
       onSnapshot(collection(db, 'sessions', sessionId, 'members'), snap => {
         setMembers(snap.docs.map(d => ({ id: d.id, ...d.data() })));

@@ -88,14 +88,16 @@ export default function ClaimItems() {
     if (!currentMemberId) return;
 
     const unsubSession = onSnapshot(doc(db, 'sessions', sessionId), snap => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data.status === 'locked' || data.status === 'closed') {
-          navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
-          return;
-        }
-        setSession({ id: snap.id, ...data });
+      if (!snap.exists()) {
+        navigate('/', { replace: true });
+        return;
       }
+      const data = snap.data();
+      if (data.status === 'locked' || data.status === 'closed') {
+        navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
+        return;
+      }
+      setSession({ id: snap.id, ...data });
     });
     const unsubMembers = onSnapshot(collection(db, 'sessions', sessionId, 'members'), snap => {
       setMembers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -224,6 +226,7 @@ export default function ClaimItems() {
     } catch (err) {
       setClaims(p => p.filter(c => c.id !== tempId));
       console.error('Claim failed:', err);
+      showToast("Couldn't save claim. Try again.", 'error');
     }
   }
 
@@ -237,6 +240,7 @@ export default function ClaimItems() {
     } catch (err) {
       setClaims(p => [...p, toDelete]);
       console.error('Unclaim failed:', err);
+      showToast("Couldn't unclaim. Try again.", 'error');
     }
   }
 
@@ -274,7 +278,10 @@ export default function ClaimItems() {
     setClaims(p => [...p.filter(c => c.id !== existingId), optimistic]);
     setSharedSheet(null);
     try { await batch.commit(); }
-    catch (err) { console.error('Shared claim failed:', err); }
+    catch (err) {
+      console.error('Shared claim failed:', err);
+      showToast("Couldn't update shared claim. Try again.", 'error');
+    }
   }
 
   async function addMemberToShared() {

@@ -97,7 +97,7 @@ export default function ReceiptsScreen() {
                 <img
                   key={i}
                   src={url}
-                  alt=""
+                  alt={`Receipt photo ${i + 1} for ${venue.name}`}
                   style={st.thumb}
                   onClick={() => setLightbox({ urls: venue.photoUrls, index: i })}
                 />
@@ -118,7 +118,7 @@ export default function ReceiptsScreen() {
           >‹</button>
           <img
             src={lightbox.urls[lightbox.index]}
-            alt=""
+            alt={`Receipt photo ${lightbox.index + 1} of ${lightbox.urls.length}`}
             style={st.lbImg}
             onClick={e => e.stopPropagation()}
           />

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { doc, getDoc, getDocs, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import PhotoThumbnail from '../components/PhotoThumbnail';
 import { BRAND_NAME } from '../brand';
 
 function fileToBase64(file) {
@@ -611,7 +612,7 @@ export default function ConfirmItems() {
                 <div style={styles.photoRow}>
                   {newVenuePhotos.map((file, pi) => (
                     <div key={pi} style={styles.photoThumbWrapper}>
-                      <img src={URL.createObjectURL(file)} alt="" style={styles.photoThumb} />
+                      <PhotoThumbnail file={file} alt={`Receipt photo ${pi + 1}${newVenueName ? ` for ${newVenueName}` : ''}`} style={styles.photoThumb} />
                       <button style={styles.removePhoto} onClick={() => setNewVenuePhotos(p => p.filter((_, i) => i !== pi))}>×</button>
                     </div>
                   ))}

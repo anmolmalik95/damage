@@ -32,6 +32,7 @@ export default function ParsingScreen() {
       .catch(err => {
         if (!mounted) return;
         if (err.name === 'AbortError') return;
+        sessionStorage.setItem(`canRestore_upload_${sessionId}`, 'true');
         setError(err.message || 'Something went wrong. Please try again.');
       });
 

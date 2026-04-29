@@ -8,6 +8,7 @@ import { useIsDesktop } from '../hooks/useIsDesktop';
 import { useNavigation } from '../context/NavigationContext';
 import { setPendingParse } from '../utils/parseState';
 import { BRAND_NAME } from '../brand';
+import PhotoThumbnail from '../components/PhotoThumbnail';
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -429,9 +430,9 @@ function VenueBlock({ venue, venueIndex, totalVenues, onNameChange, onAddPhoto, 
       <div style={styles.photoRow}>
         {venue.photos.map((file, pi) => (
           <div key={pi} style={styles.photoThumbWrapper}>
-            <img
-              src={URL.createObjectURL(file)}
-              alt=""
+            <PhotoThumbnail
+              file={file}
+              alt={`Receipt photo ${pi + 1}${venue.name ? ` for ${venue.name}` : ''}`}
               style={styles.photoThumb}
             />
             <button style={styles.removePhoto} onClick={() => onRemovePhoto(pi)}>×</button>
