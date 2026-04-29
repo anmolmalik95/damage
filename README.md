@@ -1,8 +1,8 @@
-# unfuck
+# damage
 
 > Split the bill. No ambiguity.
 
-Live at **[unfuck.malik.codes](https://unfuck.malik.codes)**.
+Live at **[damage.malik.codes](https://damage.malik.codes)**.
 
 A bill-splitting app for groups that go out and forget who ordered what. Snap photos of the receipts, an AI parses them into line items, everyone claims what they had, and the app works out who owes whom — including shared dishes, who paid for which venue, and cross-session reconciliation when overlapping people have been splitting tabs over multiple nights.
 
@@ -58,7 +58,3 @@ Frontend and `/api/parse-receipt` deploy to Vercel from `main`. Firebase Storage
 ```bash
 gsutil cors set cors.json gs://<your-bucket>
 ```
-
-## Branding
-
-The app serves under two domains: `unfuck.malik.codes` (canonical) and `damage.malik.codes` (alias). Wordmarks and document titles switch between **UNFUCK** and **DAMAGE** based on hostname — see `src/brand.js`. Localhost and any other host default to UNFUCK.
