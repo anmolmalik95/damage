@@ -4,6 +4,7 @@ import { collection, doc, getDoc, getDocs, writeBatch, updateDoc } from 'firebas
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
+import { BRAND_NAME } from '../brand';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -119,7 +120,7 @@ export default function ManagePeople() {
   }
 
   useEffect(() => {
-    document.title = session?.name ? `Manage people · ${session.name} — Damage` : 'Damage';
+    document.title = session?.name ? `Manage people · ${session.name} — ${BRAND_NAME}` : BRAND_NAME;
   }, [session?.name]);
 
   if (loading) return (

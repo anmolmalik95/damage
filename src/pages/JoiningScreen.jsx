@@ -5,6 +5,7 @@ import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
 import { useNavigation } from '../context/NavigationContext';
+import { BRAND_NAME } from '../brand';
 
 export default function JoiningScreen() {
   const { sessionId } = useParams();
@@ -22,7 +23,7 @@ export default function JoiningScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    document.title = sessionName ? `${sessionName} — Damage` : 'Damage';
+    document.title = sessionName ? `${sessionName} — ${BRAND_NAME}` : BRAND_NAME;
   }, [sessionName]);
 
   useEffect(() => {

@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import { BRAND_NAME } from '../brand';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -45,7 +46,7 @@ export default function Breakdown() {
   const [settleUpExpanded, setSettleUpExpanded] = useState(false);
 
   useEffect(() => {
-    document.title = session?.name ? `Breakdown · ${session.name} — Damage` : 'Damage';
+    document.title = session?.name ? `Breakdown · ${session.name} — ${BRAND_NAME}` : BRAND_NAME;
   }, [session?.name]);
 
   useEffect(() => {

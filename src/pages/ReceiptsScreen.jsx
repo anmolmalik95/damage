@@ -5,6 +5,7 @@ import { db } from '../firebase';
 import { useNavigation } from '../context/NavigationContext';
 import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
+import { BRAND_NAME } from '../brand';
 
 export default function ReceiptsScreen() {
   const { sessionId } = useParams();
@@ -35,7 +36,7 @@ export default function ReceiptsScreen() {
   }, [sessionId]);
 
   useEffect(() => {
-    document.title = sessionName ? `Receipts · ${sessionName} — Damage` : 'Damage';
+    document.title = sessionName ? `Receipts · ${sessionName} — ${BRAND_NAME}` : BRAND_NAME;
   }, [sessionName]);
 
   useEffect(() => {

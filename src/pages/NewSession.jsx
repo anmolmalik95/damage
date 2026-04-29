@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { collection, doc, getDoc, setDoc, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import { BRAND_NAME } from '../brand';
 
 const EVENT_PLACEHOLDERS = [
   "Saturday night out",
@@ -72,7 +73,7 @@ export default function NewSession() {
   const eventPlaceholder = useMemo(() => pick(EVENT_PLACEHOLDERS), []);
   const namePlaceholder = useMemo(() => pick(NAME_PLACEHOLDERS), []);
 
-  useEffect(() => { document.title = 'New session — Damage'; }, []);
+  useEffect(() => { document.title = `New session — ${BRAND_NAME}`; }, []);
 
 
   // Persist every keystroke to draft

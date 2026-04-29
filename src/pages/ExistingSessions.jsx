@@ -4,6 +4,7 @@ import SkeletonBlock from '../components/SkeletonBlock';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import { BRAND_NAME } from '../brand';
 
 function formatDate(dateStr) {
   if (!dateStr) return '';
@@ -26,7 +27,7 @@ export default function ExistingSessions() {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { document.title = 'Sessions — Damage'; }, []);
+  useEffect(() => { document.title = `Sessions — ${BRAND_NAME}`; }, []);
 
   useEffect(() => {
     async function load() {

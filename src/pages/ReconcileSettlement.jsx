@@ -4,6 +4,7 @@ import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
 import { clusterMembers, fetchSessionData, buildCanonical, simplifyDebts } from '../utils/reconcileUtils';
 import { useToast } from '../context/ToastContext';
+import { BRAND_NAME } from '../brand';
 
 function autoCanonicalGroups(sessions) {
   const allMembers = sessions.flatMap(s =>
@@ -36,7 +37,7 @@ export default function ReconcileSettlement() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => { document.title = 'Reconcile — Damage'; }, []);
+  useEffect(() => { document.title = `Reconcile — ${BRAND_NAME}`; }, []);
 
   useEffect(() => {
     async function loadFromState(stateSessions, stateGroups, stateNames) {

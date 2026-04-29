@@ -4,6 +4,7 @@ import { collection, onSnapshot, getDocs, doc, updateDoc, deleteDoc } from 'fire
 import { db } from '../firebase';
 import { useToast } from '../context/ToastContext';
 import { useIsDesktop } from '../hooks/useIsDesktop';
+import { BRAND_NAME, BRAND_WORDMARK } from '../brand';
 
 const PASS = import.meta.env.VITE_ADMIN_PASSWORD || 'fucked';
 const TABS = ['all', 'open', 'locked', 'closed'];
@@ -59,7 +60,7 @@ export default function Admin() {
   const [deleteSheet, setDeleteSheet] = useState(0);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => { document.title = 'Admin — Damage'; }, []);
+  useEffect(() => { document.title = `Admin — ${BRAND_NAME}`; }, []);
 
   useEffect(() => {
     if (!authed) return;
@@ -176,7 +177,7 @@ export default function Admin() {
       <>
         <style>{`@keyframes adminShake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}`}</style>
         <div style={l.page}>
-          <h1 style={l.wordmark}>DAMAGE</h1>
+          <h1 style={l.wordmark}>{BRAND_WORDMARK}</h1>
           <div style={l.adminLabel}>Admin</div>
           <form onSubmit={handleLogin} style={l.form}>
             <input
@@ -218,7 +219,7 @@ export default function Admin() {
       {isDesktop ? (
         <div style={d.header}>
           <div style={d.headerLeft}>
-            <span style={d.wordmark}>DAMAGE</span>
+            <span style={d.wordmark}>{BRAND_WORDMARK}</span>
             <span style={d.adminLabel}>Admin</span>
           </div>
           <div style={d.headerRight}>
@@ -233,7 +234,7 @@ export default function Admin() {
         <div style={d.headerMobile}>
           <div style={d.headerTopRow}>
             <div style={d.headerLeft}>
-              <span style={d.wordmark}>DAMAGE</span>
+              <span style={d.wordmark}>{BRAND_WORDMARK}</span>
               <span style={d.adminLabel}>Admin</span>
             </div>
             <div style={d.headerActions}>

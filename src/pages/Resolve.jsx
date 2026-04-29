@@ -4,6 +4,7 @@ import SkeletonBlock from '../components/SkeletonBlock';
 import { collection, doc, getDoc, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import { BRAND_NAME } from '../brand';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -20,7 +21,7 @@ export default function Resolve() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    document.title = sessionName ? `Resolve · ${sessionName} — Damage` : 'Damage';
+    document.title = sessionName ? `Resolve · ${sessionName} — ${BRAND_NAME}` : BRAND_NAME;
   }, [sessionName]);
 
   useEffect(() => {

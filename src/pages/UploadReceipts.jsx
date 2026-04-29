@@ -7,6 +7,7 @@ import PageContainer from '../components/PageContainer';
 import { useIsDesktop } from '../hooks/useIsDesktop';
 import { useNavigation } from '../context/NavigationContext';
 import { setPendingParse } from '../utils/parseState';
+import { BRAND_NAME } from '../brand';
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -63,7 +64,7 @@ export default function UploadReceipts() {
   }, [sessionId]);
 
   useEffect(() => {
-    document.title = session?.name ? `Add receipts · ${session.name} — Damage` : 'Damage';
+    document.title = session?.name ? `Add receipts · ${session.name} — ${BRAND_NAME}` : BRAND_NAME;
   }, [session?.name]);
 
   function saveVenuesDraft(updated) {

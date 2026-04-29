@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { doc, getDoc, getDocs, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import { BRAND_NAME } from '../brand';
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -148,7 +149,7 @@ export default function ConfirmItems() {
   }, [sheetEditingKey]);
 
   useEffect(() => {
-    document.title = session?.name ? `Confirm items · ${session.name} — Damage` : 'Damage';
+    document.title = session?.name ? `Confirm items · ${session.name} — ${BRAND_NAME}` : BRAND_NAME;
   }, [session?.name]);
 
   useEffect(() => {

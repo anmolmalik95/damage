@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
 import { clusterMembers, fetchSessionData } from '../utils/reconcileUtils';
+import { BRAND_NAME } from '../brand';
 
 export default function MapPeople() {
   const navigate = useNavigate();
@@ -24,7 +25,7 @@ export default function MapPeople() {
   const [confirmedGroups, setConfirmedGroups] = useState([]);
   const confirmedGroupsRef = useRef([]);
 
-  useEffect(() => { document.title = 'Reconcile — Damage'; }, []);
+  useEffect(() => { document.title = `Reconcile — ${BRAND_NAME}`; }, []);
 
   useEffect(() => {
     if (!sessionIds.length) { navigate('/reconcile', { replace: true }); return; }

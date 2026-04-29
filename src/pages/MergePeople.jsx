@@ -4,6 +4,7 @@ import { collection, doc, getDoc, getDocs, addDoc, writeBatch, serverTimestamp }
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
+import { BRAND_NAME } from '../brand';
 
 export default function MergePeople() {
   const { sessionId } = useParams();
@@ -17,7 +18,7 @@ export default function MergePeople() {
   const [intoMember, setIntoMember] = useState(null);
 
   useEffect(() => {
-    document.title = sessionName ? `Merge people · ${sessionName} — Damage` : 'Damage';
+    document.title = sessionName ? `Merge people · ${sessionName} — ${BRAND_NAME}` : BRAND_NAME;
   }, [sessionName]);
   const [fromClaims, setFromClaims] = useState([]);
   const [intoClaims, setIntoClaims] = useState([]);

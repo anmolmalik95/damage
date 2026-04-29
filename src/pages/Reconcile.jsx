@@ -4,6 +4,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
+import { BRAND_NAME } from '../brand';
 
 export default function Reconcile() {
   const navigate = useNavigate();
@@ -13,7 +14,7 @@ export default function Reconcile() {
   const [error, setError] = useState('');
   const [continuing, setContinuing] = useState(false);
 
-  useEffect(() => { document.title = 'Reconcile — Damage'; }, []);
+  useEffect(() => { document.title = `Reconcile — ${BRAND_NAME}`; }, []);
 
   useEffect(() => {
     async function load() {

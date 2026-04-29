@@ -1,16 +1,17 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIsDesktop } from '../hooks/useIsDesktop';
+import { BRAND_NAME, BRAND_WORDMARK } from '../brand';
 
 export default function Home() {
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
 
-  useEffect(() => { document.title = 'Damage'; }, []);
+  useEffect(() => { document.title = BRAND_NAME; }, []);
 
   return (
     <div style={styles.container}>
-      <h1 style={{ ...styles.wordmark, fontSize: isDesktop ? '96px' : '72px' }}>DAMAGE</h1>
+      <h1 style={{ ...styles.wordmark, fontSize: isDesktop ? '96px' : '72px' }}>{BRAND_WORDMARK}</h1>
       <p style={styles.tagline}>Split the bill. No ambiguity.</p>
       <div style={styles.actions}>
         <button style={styles.btnPrimary} onClick={() => navigate('/session/new')}>

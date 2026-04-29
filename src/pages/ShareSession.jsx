@@ -4,6 +4,7 @@ import { doc, getDoc, getDocs, updateDoc, collection, addDoc, deleteDoc, serverT
 import { db } from '../firebase';
 import { useToast } from '../context/ToastContext';
 import PageContainer from '../components/PageContainer';
+import { BRAND_NAME } from '../brand';
 
 const BASE_URL = `${window.location.origin}/s`;
 export default function ShareSession() {
@@ -40,7 +41,7 @@ export default function ShareSession() {
   const { showToast } = useToast();
 
   useEffect(() => {
-    document.title = session?.name ? `Share · ${session.name} — Damage` : 'Damage';
+    document.title = session?.name ? `Share · ${session.name} — ${BRAND_NAME}` : BRAND_NAME;
   }, [session?.name]);
 
   useEffect(() => {
