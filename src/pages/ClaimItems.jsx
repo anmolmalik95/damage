@@ -550,7 +550,10 @@ export default function ClaimItems() {
           item => claimsFor(item.id).length >= (item.quantity ?? 1)
         );
         return (
-        <div key={venue.id} style={s.venueBlock}>
+        <div
+          key={venue.id}
+          style={{ ...s.venueBlock, ...(isVenueFullyClaimed ? { border: '0.5px solid #27500A' } : {}) }}
+        >
           <div style={s.venueHeader}>
             <span>{venue.name}</span>
             {isVenueFullyClaimed && (

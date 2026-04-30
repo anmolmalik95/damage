@@ -468,7 +468,7 @@ export default function ConfirmItems() {
           const isVenueComplete = allItemsValid && (!isParsedVenue || vDiffOk);
           return (
             <Fragment key={vi}>
-              <div style={styles.venueBlock}>
+              <div style={{ ...styles.venueBlock, ...(isVenueComplete ? { border: '0.5px solid #27500A' } : {}) }}>
                 <div style={styles.venueHeader}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={styles.venueHeaderText}>{venue.name}</span>
