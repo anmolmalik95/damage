@@ -73,6 +73,9 @@ export default function ClaimItems() {
   const [endSessionConfirmOpen, setEndSessionConfirmOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [addPersonName, setAddPersonName] = useState('');
+  const [addPersonSaving, setAddPersonSaving] = useState(false);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -298,6 +301,25 @@ export default function ClaimItems() {
       setSharedSelected(p => [...p, ref.id]);
       setSharedNewName('');
     } catch (err) { console.error(err); }
+  }
+
+  async function handleAddPerson() {
+    const name = addPersonName.trim();
+    if (!name || addPersonSaving) return;
+    setAddPersonSaving(true);
+    try {
+      await addDoc(collection(db, 'sessions', sessionId, 'members'), {
+        name, joinedAt: serverTimestamp(), isCreator: false,
+      });
+      setAddPersonName('');
+      setAddPersonOpen(false);
+      showToast(`Added ${name}`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't add person. Try again.", 'error');
+    } finally {
+      setAddPersonSaving(false);
+    }
   }
 
   async function handleFinalise() {
@@ -780,6 +802,7 @@ export default function ClaimItems() {
       {menuOpen && (() => {
         const menuItems = [
           { icon: '🔗', label: 'Copy link to session', action: handleCopyLink },
+          { icon: '➕', label: 'Add person', action: () => { setMenuOpen(false); setAddPersonName(''); setAddPersonOpen(true); } },
           ...(isCreator ? [
             { icon: '✏️', label: 'Rename session', action: () => { setMenuOpen(false); setRenameValue(session?.name ?? ''); setRenameOpen(true); } },
             { icon: '👥', label: 'Manage people', action: () => { setMenuOpen(false); navigateForward(`/session/${sessionId}/manage-people`); } },
@@ -893,6 +916,39 @@ export default function ClaimItems() {
             <div style={s.sheetBtns}>
               <button style={s.sheetCancelBtn} onClick={() => setEndSessionConfirmOpen(false)}>Cancel</button>
               <button style={{ ...s.sheetConfirmBtn, backgroundColor: '#e24b4a' }} onClick={handleEndSessionFromMenu}>End session</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Add person sheet */}
+      {addPersonOpen && (
+        <>
+          <div style={s.backdrop} onClick={() => !addPersonSaving && setAddPersonOpen(false)} />
+          <div role="dialog" aria-modal="true" aria-label="Add person" style={s.sheet}>
+            <div style={s.sheetHandle} />
+            <div style={s.sheetTitle}>Add person</div>
+            <div style={s.sheetSubtitle}>They'll be able to claim items.</div>
+            <input
+              autoFocus
+              aria-label="Person's name"
+              style={s.renameInput}
+              value={addPersonName}
+              maxLength={50}
+              onChange={e => setAddPersonName(e.target.value)}
+              placeholder="Name"
+              onKeyDown={e => e.key === 'Enter' && handleAddPerson()}
+              disabled={addPersonSaving}
+            />
+            <div style={s.sheetBtns}>
+              <button style={s.sheetCancelBtn} onClick={() => setAddPersonOpen(false)} disabled={addPersonSaving}>Cancel</button>
+              <button
+                style={{ ...s.sheetConfirmBtn, opacity: (!addPersonName.trim() || addPersonSaving) ? 0.6 : 1 }}
+                onClick={handleAddPerson}
+                disabled={!addPersonName.trim() || addPersonSaving}
+              >
+                {addPersonSaving ? 'Adding…' : 'Add'}
+              </button>
             </div>
           </div>
         </>

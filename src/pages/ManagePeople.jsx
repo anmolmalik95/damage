@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { collection, doc, getDoc, getDocs, writeBatch, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, addDoc, writeBatch, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import { useToast } from '../context/ToastContext';
 import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
 import { BRAND_NAME } from '../brand';
@@ -34,6 +35,10 @@ export default function ManagePeople() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [mergeTarget, setMergeTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [addPersonName, setAddPersonName] = useState('');
+  const [addPersonSaving, setAddPersonSaving] = useState(false);
+  const { showToast } = useToast();
 
   useEffect(() => {
     async function load() {
@@ -71,6 +76,26 @@ export default function ManagePeople() {
         : (item.unitPrice ?? 0));
     }, 0);
     return { count: mc.length, total };
+  }
+
+  async function handleAddPerson() {
+    const name = addPersonName.trim();
+    if (!name || addPersonSaving) return;
+    setAddPersonSaving(true);
+    try {
+      const ref = await addDoc(collection(db, 'sessions', sessionId, 'members'), {
+        name, joinedAt: serverTimestamp(), isCreator: false,
+      });
+      setMembers(p => [...p, { id: ref.id, name, isCreator: false }]);
+      setAddPersonName('');
+      setAddPersonOpen(false);
+      showToast(`Added ${name}`, 'success');
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't add person. Try again.", 'error');
+    } finally {
+      setAddPersonSaving(false);
+    }
   }
 
   async function handleDeleteConfirm() {
@@ -159,6 +184,13 @@ export default function ManagePeople() {
         Deleting a person returns all their claims to unclaimed. Merging combines two accounts.
       </div>
 
+      <button
+        style={st.addPersonBtn}
+        onClick={() => { setAddPersonName(''); setAddPersonOpen(true); }}
+      >
+        + Add person
+      </button>
+
       <div style={st.memberList}>
         {members.map((member, idx) => {
           const stats = memberStats(member.id);
@@ -203,6 +235,39 @@ export default function ManagePeople() {
         </>
       )}
 
+      {/* Add person sheet */}
+      {addPersonOpen && (
+        <>
+          <div style={st.backdrop} onClick={() => !addPersonSaving && setAddPersonOpen(false)} />
+          <div role="dialog" aria-modal="true" aria-label="Add person" style={st.sheet}>
+            <div style={st.sheetHandle} />
+            <div style={st.sheetTitle}>Add person</div>
+            <div style={st.sheetSubtitle}>They'll be able to claim items.</div>
+            <input
+              autoFocus
+              aria-label="Person's name"
+              style={st.addPersonInput}
+              value={addPersonName}
+              maxLength={50}
+              onChange={e => setAddPersonName(e.target.value)}
+              placeholder="Name"
+              onKeyDown={e => e.key === 'Enter' && handleAddPerson()}
+              disabled={addPersonSaving}
+            />
+            <div style={st.sheetBtns}>
+              <button style={st.cancelBtn} onClick={() => setAddPersonOpen(false)} disabled={addPersonSaving}>Cancel</button>
+              <button
+                style={{ ...st.confirmBtn, backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)', opacity: (!addPersonName.trim() || addPersonSaving) ? 0.6 : 1 }}
+                onClick={handleAddPerson}
+                disabled={!addPersonName.trim() || addPersonSaving}
+              >
+                {addPersonSaving ? 'Adding…' : 'Add'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Merge picker sheet */}
       {mergeTarget && (
         <>
@@ -238,6 +303,8 @@ const st = {
   title: { fontSize: '20px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   subtitle: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '2px' },
   helper: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px' },
+  addPersonBtn: { width: '100%', padding: '12px', fontSize: '13px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'transparent', color: 'var(--text-primary)', border: '0.5px dashed var(--border-color)', borderRadius: '8px', cursor: 'pointer', marginBottom: '12px' },
+  addPersonInput: { width: '100%', padding: '12px 14px', fontSize: '14px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '8px', boxSizing: 'border-box', marginBottom: '16px', outline: 'none' },
   memberList: { border: '0.5px solid var(--border-color)', borderRadius: '12px', overflow: 'hidden' },
   memberRow: { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', backgroundColor: 'var(--bg-primary)' },
   memberInfo: { flex: 1, minWidth: 0 },
