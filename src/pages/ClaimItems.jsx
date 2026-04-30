@@ -142,7 +142,9 @@ export default function ClaimItems() {
         const unsub = onSnapshot(
           collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'),
           itemsSnap => {
-            itemDataMap[vDoc.id] = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            itemDataMap[vDoc.id] = itemsSnap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(i => (i.unitPrice ?? 0) > 0);
             rebuildVenues(venuesSnap.docs);
           }
         );
@@ -314,6 +316,7 @@ export default function ClaimItems() {
         const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'));
         iSnap.docs.forEach(iDoc => {
           const item = iDoc.data();
+          if ((item.unitPrice ?? 0) === 0) return;
           const qty = item.quantity ?? 1;
           const itemClaims = allClaims.filter(c => c.itemId === iDoc.id);
           if (itemClaims.length > qty) { needsResolve = true; return; }
@@ -426,6 +429,7 @@ export default function ClaimItems() {
         const iSnap = await getDocs(collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items'));
         iSnap.docs.forEach(iDoc => {
           const item = iDoc.data();
+          if ((item.unitPrice ?? 0) === 0) return;
           const qty = item.quantity ?? 1;
           const itemClaims = allClaims.filter(c => c.itemId === iDoc.id);
           if (itemClaims.length > qty) { needsResolve = true; return; }

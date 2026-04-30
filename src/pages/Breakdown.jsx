@@ -96,7 +96,13 @@ export default function Breakdown() {
           const itemsSnap = await getDocs(
             collection(db, 'sessions', sessionId, 'venues', vDoc.id, 'items')
           );
-          return { id: vDoc.id, ...vDoc.data(), items: itemsSnap.docs.map(d => ({ id: d.id, ...d.data() })) };
+          return {
+            id: vDoc.id,
+            ...vDoc.data(),
+            items: itemsSnap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(i => (i.unitPrice ?? 0) > 0),
+          };
         })
       );
       setVenues(venueList);
