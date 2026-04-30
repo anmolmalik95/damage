@@ -5,6 +5,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import { BRAND_NAME } from '../brand';
+import { clickKey } from '../utils/a11y';
 
 function formatDate(dateStr) {
   if (!dateStr) return '';
@@ -107,7 +108,15 @@ export default function ExistingSessions() {
         <div style={s.empty}>No sessions yet. Create one from the home screen.</div>
       ) : (
         sessions.map(session => (
-          <div key={session.id} style={s.row} onClick={() => handleTap(session)}>
+          <div
+            key={session.id}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open session ${session.name}`}
+            style={s.row}
+            onClick={() => handleTap(session)}
+            onKeyDown={clickKey(() => handleTap(session))}
+          >
             <div style={s.rowLeft}>
               <div style={s.name}>{session.name}</div>
               <div style={s.meta}>

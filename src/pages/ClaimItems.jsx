@@ -10,6 +10,7 @@ import {
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import { BRAND_NAME } from '../brand';
+import { clickKey } from '../utils/a11y';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -544,7 +545,14 @@ export default function ClaimItems() {
 
             return (
               <div key={item.id}>
-                <div style={{ ...s.itemRow, cursor: 'pointer' }} onClick={() => toggleItem(item.id)}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={isExpanded}
+                  style={{ ...s.itemRow, cursor: 'pointer' }}
+                  onClick={() => toggleItem(item.id)}
+                  onKeyDown={clickKey(() => toggleItem(item.id))}
+                >
                   <div style={s.itemLeft}>
                     <div style={s.itemNameRow}>
                       <span style={s.itemName}>{item.name}</span>
@@ -631,7 +639,14 @@ export default function ClaimItems() {
             );
             return (
               <div key={member.id} style={{ ...s.personBlock, borderBottom: isLast ? 'none' : '0.5px solid var(--border-color)' }}>
-                <div style={s.personHeader} onClick={() => togglePerson(member.id)}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={isExp}
+                  style={s.personHeader}
+                  onClick={() => togglePerson(member.id)}
+                  onKeyDown={clickKey(() => togglePerson(member.id))}
+                >
                   <div style={s.personLeft}>
                     <Avatar name={member.name} index={idx} />
                     <span style={s.personName}>{member.name}</span>
@@ -804,7 +819,7 @@ export default function ClaimItems() {
       {billPayersSheetOpen && (
         <>
           <div style={s.backdrop} onClick={() => setBillPayersSheetOpen(false)} />
-          <div style={s.sheet}>
+          <div role="dialog" aria-modal="true" aria-label="Manage bill payers" style={s.sheet}>
             <div style={s.sheetHandle} />
             <div style={s.sheetTitle}>Manage bill payers</div>
             <div style={s.sheetSubtitle}>Set who paid for each venue.</div>
@@ -867,7 +882,7 @@ export default function ClaimItems() {
       {endSessionConfirmOpen && (
         <>
           <div style={s.backdrop} onClick={() => setEndSessionConfirmOpen(false)} />
-          <div style={s.sheet}>
+          <div role="dialog" aria-modal="true" aria-label="End this session?" style={s.sheet}>
             <div style={s.sheetHandle} />
             <div style={s.sheetTitle}>End this session?</div>
             <div style={s.sheetSubtitle}>All claiming will stop. Members will see a final breakdown.</div>
@@ -883,11 +898,12 @@ export default function ClaimItems() {
       {renameOpen && (
         <>
           <div style={s.backdrop} onClick={() => setRenameOpen(false)} />
-          <div style={s.sheet}>
+          <div role="dialog" aria-modal="true" aria-label="Rename session" style={s.sheet}>
             <div style={s.sheetHandle} />
             <div style={s.sheetTitle}>Rename session</div>
             <input
               autoFocus
+              aria-label="Session name"
               style={s.renameInput}
               value={renameValue}
               maxLength={50}
@@ -929,7 +945,7 @@ export default function ClaimItems() {
       {sharedSheet && (
         <>
           <div style={s.backdrop} onClick={() => setSharedSheet(null)} />
-          <div style={s.sharedSheetPanel}>
+          <div role="dialog" aria-modal="true" aria-label="Share this item" style={s.sharedSheetPanel}>
             <div style={s.sheetHandle} />
             <div style={s.sharedSheetInner}>
             <div style={s.sheetTitle}>{sharedSheet.itemName} · ${(sharedSheet.unitPrice ?? 0).toFixed(2)}</div>
@@ -966,6 +982,7 @@ export default function ClaimItems() {
               <div style={s.sharedAddRow}>
                 <input
                   autoFocus
+                  aria-label="New person name"
                   style={s.sharedAddInput}
                   value={sharedNewName}
                   onChange={e => setSharedNewName(e.target.value)}

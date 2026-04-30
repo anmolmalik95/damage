@@ -94,3 +94,14 @@ input[type=number] {
   animation: spin 0.7s linear infinite;
   flex-shrink: 0;
 }
+
+.unstyled-btn {
+  all: unset;
+  cursor: pointer;
+  box-sizing: border-box;
+  display: block;
+}
+.unstyled-btn:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}

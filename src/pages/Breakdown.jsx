@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useNavigation } from '../context/NavigationContext';
@@ -10,6 +10,7 @@ import {
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import { BRAND_NAME } from '../brand';
+import { clickKey } from '../utils/a11y';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -116,7 +117,7 @@ export default function Breakdown() {
   }, [sessionId]);
 
   // Compute per-venue per-member breakdown data
-  function computeVenueData(venue) {
+  const computeVenueData = useCallback((venue) => {
     const memberSubtotals = {};
     const claimsForItem = {};
 
@@ -162,7 +163,64 @@ export default function Breakdown() {
       result[memberId] = { subtotal: sub, gst, sc, total: sub + gst + sc, itemRows };
     }
     return result;
-  }
+  }, [claims, members]);
+
+  // Memoised: avoid recomputing every render
+  const venueDataMap = useMemo(
+    () => venues.map(v => ({ venue: v, memberData: computeVenueData(v) })),
+    [venues, computeVenueData]
+  );
+
+  const debtTransactions = useMemo(() => {
+    if (!session?.multiPayer) return [];
+
+    const netBalances = {};
+    for (const { venue, memberData } of venueDataMap) {
+      const isTransport = venue.name === 'Transport' || venue.isTransport;
+      if (isTransport) {
+        for (const item of venue.items) {
+          const itemBillPayer = item.billPayer;
+          if (!itemBillPayer) continue;
+          const itemClaims = claims.filter(c => c.itemId === item.id);
+          for (const claim of itemClaims) {
+            if (claim.type === 'whole') {
+              const debtor = claim.memberId;
+              if (debtor === itemBillPayer) continue;
+              netBalances[debtor] = (netBalances[debtor] || 0) - (item.unitPrice ?? 0);
+              netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + (item.unitPrice ?? 0);
+            } else if (claim.type === 'shared') {
+              const share = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
+              for (const debtor of (claim.sharedWith || [])) {
+                if (debtor === itemBillPayer) continue;
+                netBalances[debtor] = (netBalances[debtor] || 0) - share;
+                netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + share;
+              }
+            }
+          }
+        }
+      } else {
+        const vBillPayer = venue.billPayer;
+        if (!vBillPayer) continue;
+        for (const [memberId, data] of Object.entries(memberData)) {
+          if (memberId === vBillPayer) continue;
+          netBalances[memberId] = (netBalances[memberId] || 0) - data.total;
+          netBalances[vBillPayer] = (netBalances[vBillPayer] || 0) + data.total;
+        }
+      }
+    }
+    const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
+    const transactions = [];
+    for (let i = 0; i < 500; i++) {
+      const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
+      const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
+      if (creditor.bal < 0.005 || debtor.bal > -0.005) break;
+      const amount = Math.min(creditor.bal, -debtor.bal);
+      transactions.push({ fromId: debtor.id, toId: creditor.id, amount: Math.round(amount * 100) / 100 });
+      creditor.bal -= amount;
+      debtor.bal += amount;
+    }
+    return transactions;
+  }, [session?.multiPayer, venueDataMap, claims]);
 
   async function togglePaid(memberId) {
     const cur = paidStatus[memberId]?.paid ?? false;
@@ -289,9 +347,6 @@ export default function Breakdown() {
     return sum + itemsTotal + (v.gstAmount || 0) + (v.serviceChargeAmount || 0);
   }, 0);
 
-  // Pre-compute all venue data for rendering
-  const venueDataMap = venues.map(v => ({ venue: v, memberData: computeVenueData(v) }));
-
   // Grand totals with penny-rounding adjustment
   const grandTotals = {};
   for (const { memberData } of venueDataMap) {
@@ -345,60 +400,6 @@ export default function Breakdown() {
     return rawDebts;
   }
 
-  // Build debt transactions: single-payer or multi-payer debt graph
-  function buildDebtTransactions() {
-    if (!session.multiPayer) return [];
-
-    const netBalances = {};
-    for (const { venue, memberData } of venueDataMap) {
-      const isTransport = venue.name === 'Transport' || venue.isTransport;
-      if (isTransport) {
-        // Transport uses per-item bill payers
-        for (const item of venue.items) {
-          const itemBillPayer = item.billPayer;
-          if (!itemBillPayer) continue;
-          const itemClaims = claims.filter(c => c.itemId === item.id);
-          for (const claim of itemClaims) {
-            if (claim.type === 'whole') {
-              const debtor = claim.memberId;
-              if (debtor === itemBillPayer) continue;
-              netBalances[debtor] = (netBalances[debtor] || 0) - (item.unitPrice ?? 0);
-              netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + (item.unitPrice ?? 0);
-            } else if (claim.type === 'shared') {
-              const share = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
-              for (const debtor of (claim.sharedWith || [])) {
-                if (debtor === itemBillPayer) continue;
-                netBalances[debtor] = (netBalances[debtor] || 0) - share;
-                netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + share;
-              }
-            }
-          }
-        }
-      } else {
-        const vBillPayer = venue.billPayer;
-        if (!vBillPayer) continue;
-        for (const [memberId, data] of Object.entries(memberData)) {
-          if (memberId === vBillPayer) continue;
-          netBalances[memberId] = (netBalances[memberId] || 0) - data.total;
-          netBalances[vBillPayer] = (netBalances[vBillPayer] || 0) + data.total;
-        }
-      }
-    }
-    const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
-    const transactions = [];
-    for (let i = 0; i < 500; i++) {
-      const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
-      const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
-      if (creditor.bal < 0.005 || debtor.bal > -0.005) break;
-      const amount = Math.min(creditor.bal, -debtor.bal);
-      transactions.push({ fromId: debtor.id, toId: creditor.id, amount: Math.round(amount * 100) / 100 });
-      creditor.bal -= amount;
-      debtor.bal += amount;
-    }
-    return transactions;
-  }
-
-  const debtTransactions = buildDebtTransactions();
   const rawDebts = session.multiPayer ? buildRawDebts() : [];
   const sessionNettingOccurred = session.multiPayer && new Set(rawDebts.map(d => d.creditorId)).size > 1;
 
@@ -669,7 +670,14 @@ export default function Breakdown() {
             key={member.id}
             style={{ ...s.memberCard, ...(paid ? { border: '0.5px solid #27500A' } : {}) }}
           >
-            <div style={{ ...s.cardHeader, cursor: 'pointer' }} onClick={() => toggleCard(member.id)}>
+            <div
+              role="button"
+              tabIndex={0}
+              aria-expanded={isExpanded}
+              style={{ ...s.cardHeader, cursor: 'pointer' }}
+              onClick={() => toggleCard(member.id)}
+              onKeyDown={clickKey(() => toggleCard(member.id))}
+            >
               <div style={s.cardLeft}>
                 <div style={{ ...s.avatar, backgroundColor: avatarCol }}>
                   {member.name.charAt(0).toUpperCase()}
@@ -900,7 +908,7 @@ export default function Breakdown() {
         return (
           <>
             <div style={s.sheetBackdrop} onClick={() => setMenuOpen(false)} />
-            <div style={s.menuSheet}>
+            <div role="dialog" aria-modal="true" aria-label="Session menu" style={s.menuSheet}>
               <div style={s.sheetHandle} />
               {menuItems.map((item, i) => (
                 <div
@@ -921,11 +929,12 @@ export default function Breakdown() {
       {instrSheetOpen && (
         <>
           <div style={s.sheetBackdrop} onClick={() => setInstrSheetOpen(false)} />
-          <div style={s.menuSheet}>
+          <div role="dialog" aria-modal="true" aria-label="Edit payment instructions" style={s.menuSheet}>
             <div style={s.sheetHandle} />
             <div style={s.renameTitle}>Payment instructions</div>
             <textarea
               autoFocus
+              aria-label="Payment instructions"
               style={{ ...s.instrTextarea, marginBottom: '6px' }}
               value={instrSheetDraft}
               maxLength={200}
@@ -946,7 +955,7 @@ export default function Breakdown() {
       {billPayersSheetOpen && (
         <>
           <div style={s.sheetBackdrop} onClick={() => setBillPayersSheetOpen(false)} />
-          <div style={s.menuSheet}>
+          <div role="dialog" aria-modal="true" aria-label="Manage bill payers" style={s.menuSheet}>
             <div style={s.sheetHandle} />
             <div style={s.renameTitle}>Manage bill payers</div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px' }}>
@@ -1016,11 +1025,12 @@ export default function Breakdown() {
       {renameOpen && (
         <>
           <div style={s.sheetBackdrop} onClick={() => setRenameOpen(false)} />
-          <div style={s.menuSheet}>
+          <div role="dialog" aria-modal="true" aria-label="Rename session" style={s.menuSheet}>
             <div style={s.sheetHandle} />
             <div style={s.renameTitle}>Rename session</div>
             <input
               autoFocus
+              aria-label="Session name"
               style={s.renameInput}
               value={renameValue}
               maxLength={50}
