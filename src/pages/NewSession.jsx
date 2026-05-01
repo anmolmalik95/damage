@@ -138,6 +138,7 @@ export default function NewSession() {
           <input
             style={styles.input}
             type="text"
+            enterKeyHint="next"
             value={eventName}
             onChange={e => setEventName(e.target.value)}
             placeholder={eventPlaceholder}
@@ -159,6 +160,7 @@ export default function NewSession() {
           <input
             style={styles.input}
             type="text"
+            enterKeyHint="done"
             value={userName}
             onChange={e => setUserName(e.target.value)}
             placeholder={namePlaceholder}

@@ -375,6 +375,7 @@ export default function UploadReceipts() {
               <input
                 style={{ ...styles.cabInput, width: '72px' }}
                 type="number"
+                inputMode="decimal"
                 value={cab.price}
                 step="0.01"
                 min="0"
@@ -475,6 +476,7 @@ function VenueBlock({ venue, venueIndex, totalVenues, onNameChange, onAddPhoto, 
               <input
                 style={{ ...styles.manualInput, width: '44px' }}
                 type="number"
+                inputMode="numeric"
                 value={item.qty}
                 min="1"
                 onChange={e => onUpdateManual(i, 'qty', e.target.value)}
@@ -482,6 +484,7 @@ function VenueBlock({ venue, venueIndex, totalVenues, onNameChange, onAddPhoto, 
               <input
                 style={{ ...styles.manualInput, width: '70px' }}
                 type="number"
+                inputMode="decimal"
                 value={item.price}
                 step="0.01"
                 min="0"
@@ -812,6 +815,7 @@ const styles = {
     left: 0,
     right: 0,
     padding: '16px',
+    paddingBottom: 'calc(16px + env(safe-area-inset-bottom))',
     backgroundColor: 'var(--bg-primary)',
     borderTop: '0.5px solid var(--border-color)',
   },

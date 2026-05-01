@@ -647,7 +647,7 @@ const st = {
   bottomBtns: { display: 'flex', flexDirection: 'column', gap: '8px', paddingBottom: '16px' },
   saveBtn: { width: '100%', padding: '13px', fontSize: '14px', fontWeight: 500, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--btn-primary-bg)', color: 'var(--btn-primary-text)', border: 'none', borderRadius: '8px', cursor: 'pointer' },
   backdrop: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.45)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' },
-  sheet: { width: '100%', maxWidth: '480px', backgroundColor: 'var(--bg-primary)', borderRadius: '16px 16px 0 0', padding: '12px 16px 36px' },
+  sheet: { width: '100%', maxWidth: '480px', backgroundColor: 'var(--bg-primary)', borderRadius: '16px 16px 0 0', padding: '12px 16px 36px', paddingBottom: 'calc(36px + env(safe-area-inset-bottom))' },
   sheetHandle: { width: '36px', height: '4px', borderRadius: '2px', backgroundColor: 'var(--border-color)', margin: '0 auto 16px' },
   sheetTitle: { fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '8px' },
   sheetBody: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '20px', lineHeight: 1.5 },

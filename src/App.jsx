@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { NavigationProvider } from './context/NavigationContext';
@@ -57,7 +58,25 @@ function AppRoutes() {
   );
 }
 
+function useKeyboardAwareScroll() {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    function onResize() {
+      const el = document.activeElement;
+      if (!el || !['INPUT', 'TEXTAREA'].includes(el.tagName)) return;
+      // Only scroll when the keyboard is open (visual viewport noticeably smaller).
+      if (vv.height < window.innerHeight - 100) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
+}
+
 export default function App() {
+  useKeyboardAwareScroll();
   return (
     <BrowserRouter>
       <NavigationProvider>

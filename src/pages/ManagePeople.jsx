@@ -314,7 +314,7 @@ const st = {
   deleteBtn: { fontSize: '11px', color: '#e24b4a', border: '0.5px solid #e24b4a', borderRadius: '6px', padding: '4px 10px', backgroundColor: 'transparent', cursor: 'pointer', fontFamily: 'system-ui, -apple-system, sans-serif' },
   mergeBtn: { fontSize: '11px', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', padding: '4px 10px', backgroundColor: 'transparent', cursor: 'pointer', fontFamily: 'system-ui, -apple-system, sans-serif' },
   backdrop: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 100 },
-  sheet: { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 101, backgroundColor: 'var(--bg-primary)', borderRadius: '20px 20px 0 0', padding: '12px 20px 40px', maxHeight: '80vh', overflowY: 'auto' },
+  sheet: { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 101, backgroundColor: 'var(--bg-primary)', borderRadius: '20px 20px 0 0', padding: '12px 20px 40px', paddingBottom: 'calc(40px + env(safe-area-inset-bottom))', maxHeight: '80vh', overflowY: 'auto' },
   sheetHandle: { width: '36px', height: '4px', borderRadius: '2px', backgroundColor: 'var(--border-color)', margin: '0 auto 16px' },
   sheetTitle: { fontSize: '15px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '4px' },
   sheetSubtitle: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '16px' },

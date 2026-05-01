@@ -527,6 +527,7 @@ export default function ConfirmItems() {
                     <input
                       style={styles.receiptInput}
                       type="number"
+                      inputMode="decimal"
                       step="0.01"
                       value={venue.userReceiptTotal}
                       onChange={e => updateVenueReceiptTotal(vi, e.target.value)}
@@ -651,6 +652,7 @@ export default function ConfirmItems() {
                         <input
                           style={{ ...styles.manualInput, width: '44px' }}
                           type="number"
+                          inputMode="numeric"
                           value={item.qty}
                           min="1"
                           onChange={e => setNewVenueManualItems(p => p.map((it, j) => j === i ? { ...it, qty: e.target.value } : it))}
@@ -658,6 +660,7 @@ export default function ConfirmItems() {
                         <input
                           style={{ ...styles.manualInput, width: '70px' }}
                           type="number"
+                          inputMode="decimal"
                           value={item.price}
                           step="0.01"
                           min="0"
@@ -747,6 +750,7 @@ export default function ConfirmItems() {
                         <input
                           style={styles.receiptInput}
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           value={newVenueUserReceiptTotal}
                           onChange={e => setNewVenueUserReceiptTotal(e.target.value)}
@@ -1171,7 +1175,9 @@ const styles = {
   addVenueSheet: {
     position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 201,
     backgroundColor: 'var(--bg-primary)', borderRadius: '20px 20px 0 0',
-    height: '95vh', overflowY: 'auto', padding: '12px 16px 32px',
+    height: '95vh', overflowY: 'auto',
+    padding: '12px 16px 32px',
+    paddingBottom: 'calc(32px + env(safe-area-inset-bottom))',
     display: 'flex', flexDirection: 'column',
   },
   sheetDragHandle: { width: '36px', height: '4px', borderRadius: '2px', backgroundColor: 'var(--border-color)', margin: '0 auto 16px', flexShrink: 0 },

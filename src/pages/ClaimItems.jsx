@@ -1331,13 +1331,17 @@ const s = {
   sheet: {
     position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 101,
     backgroundColor: 'var(--bg-primary)', borderRadius: '20px 20px 0 0',
-    padding: '12px 20px 40px', maxHeight: '80vh', overflowY: 'auto',
+    padding: '12px 20px 40px',
+    paddingBottom: 'calc(40px + env(safe-area-inset-bottom))',
+    maxHeight: '80vh', overflowY: 'auto',
   },
   // Shared item sheet (dedicated panel)
   sharedSheetPanel: {
     position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 101,
     backgroundColor: 'var(--bg-primary)', borderRadius: '20px 20px 0 0',
-    padding: '20px 16px 32px', maxHeight: '85vh', overflowY: 'auto',
+    padding: '20px 16px 32px',
+    paddingBottom: 'calc(32px + env(safe-area-inset-bottom))',
+    maxHeight: '85vh', overflowY: 'auto',
   },
   sharedSheetInner: {
     maxWidth: '480px', margin: '0 auto',
