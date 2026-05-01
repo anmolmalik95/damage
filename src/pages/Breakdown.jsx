@@ -458,8 +458,7 @@ export default function Breakdown() {
       <div style={s.header}>
         <button style={s.back} onClick={() => {
           if (location.state?.from === 'claim') navigateBack(`/session/${sessionId}/claim`);
-          else if (location.state?.from === 'who-are-you') navigateBack(`/s/${sessionId}`);
-          else navigateBack('/existing-sessions');
+          else navigateBack(`/s/${sessionId}`, { state: { allowSwitch: true } });
         }}>←</button>
         <div style={s.headerText}>
           <div style={s.title}>Bill breakdown</div>

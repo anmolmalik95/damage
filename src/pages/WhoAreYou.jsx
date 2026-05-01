@@ -36,7 +36,9 @@ export default function WhoAreYou() {
       setSession(data);
 
       const existingId = localStorage.getItem(`member_${sessionId}`);
-      if (existingId) {
+      // If the user came from Breakdown's back button (allowSwitch flag),
+      // skip the auto-redirect so they can re-pick their identity.
+      if (existingId && !location.state?.allowSwitch) {
         if (data.status === 'locked' || data.status === 'closed') {
           navigateForward(`/session/${sessionId}/breakdown`, { replace: true });
         } else {
@@ -48,6 +50,8 @@ export default function WhoAreYou() {
       const mSnap = await getDocs(collection(db, 'sessions', sessionId, 'members'));
       setMembers(mSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setMemberCount(mSnap.docs.length);
+      // Pre-select the current identity if the user came back to switch.
+      if (existingId) setSelectedId(existingId);
 
       let total = 0;
       try {
