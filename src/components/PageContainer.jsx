@@ -16,6 +16,11 @@ export default function PageContainer({ children, noPadBottom }) {
         minHeight: '100vh',
         backgroundColor: 'var(--bg-primary)',
         padding: isDesktop ? '48px 48px' : `20px 16px ${noPadBottom ? '80px' : '20px'}`,
+        paddingBottom: isDesktop
+          ? '48px'
+          : noPadBottom
+            ? 'calc(80px + env(safe-area-inset-bottom))'
+            : 'calc(20px + env(safe-area-inset-bottom))',
       }}
     >
       <div style={{
