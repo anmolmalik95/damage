@@ -596,7 +596,9 @@ export default function ClaimItems() {
                         {totalClaimed}/{qty}
                       </span>
                     </div>
-                    {attribution && <div style={s.itemAttribution}>{attribution}</div>}
+                    <div style={s.itemAttribution}>
+                      ${(item.unitPrice ?? 0).toFixed(2)}{attribution ? ` · ${attribution}` : ''}
+                    </div>
                   </div>
                   <div style={s.itemControls}>
                     <span
