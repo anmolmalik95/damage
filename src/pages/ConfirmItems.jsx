@@ -805,7 +805,13 @@ function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChang
   useEffect(() => {
     if (!isEditing) return;
     function outside(e) {
-      if (rowRef.current && !rowRef.current.contains(e.target)) onClose();
+      // If the tap is on any item row (this row OR another), don't close here.
+      // - Tap inside this row: user is interacting with inputs/buttons.
+      // - Tap on another row: that row's onClick will handle the switch via toggleEdit.
+      // Closing here would set state on touchstart/mousedown, causing layout shift
+      // that breaks the click target on iOS.
+      if (e.target.closest('[data-row]')) return;
+      onClose();
     }
     function onUserScroll() {
       onClose();
@@ -824,7 +830,7 @@ function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChang
 
   if (!isEditing) {
     return (
-      <div ref={rowRef} style={{ ...styles.itemRow, cursor: 'pointer' }} onClick={onToggleEdit}>
+      <div ref={rowRef} data-row="true" style={{ ...styles.itemRow, cursor: 'pointer' }} onClick={onToggleEdit}>
         <div style={{ flex: 1 }}>
           <div style={styles.itemName}>{item.name || 'Unnamed item'}</div>
           <div style={styles.itemMetaLabel}>×{item.quantity} · ${Number(item.unitPrice).toFixed(2)}</div>
@@ -837,7 +843,7 @@ function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChang
   const priceDisplay = priceFocused ? priceStr : `$${parseFloat(priceStr || '0').toFixed(2)}`;
 
   return (
-    <div ref={rowRef} style={styles.itemRowEdit}>
+    <div ref={rowRef} data-row="true" style={styles.itemRowEdit}>
       <input
         style={styles.itemNameInput}
         value={item.name}
@@ -871,7 +877,9 @@ function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChang
           onChange={e => {
             const raw = e.target.value.replace(/[^0-9.]/g, '');
             setPriceStr(raw);
-            onEditChange('unitPrice', parseFloat(raw) || 0);
+            const parsed = parseFloat(raw) || 0;
+            onUpdate('unitPrice', parsed);
+            onEditChange('unitPrice', parsed);
           }}
           onBlur={() => {
             const val = parseFloat(priceStr) || 0;
