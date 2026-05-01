@@ -488,6 +488,7 @@ export default function ConfirmItems() {
                     item={item}
                     isEditing={editingKey === `${vi}_${item.id}`}
                     onToggleEdit={() => toggleEdit(vi, item.id)}
+                    onClose={() => setEditingKey(null)}
                     onUpdate={(field, val) => updateItem(vi, item.id, field, val)}
                     onEditChange={handleEditChange}
                     onDelete={() => { deleteItem(vi, item.id); setEditingKey(null); }}
@@ -789,7 +790,7 @@ export default function ConfirmItems() {
   );
 }
 
-function ItemRow({ item, isEditing, onToggleEdit, onUpdate, onEditChange, onDelete }) {
+function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChange, onDelete }) {
   const rowRef = useRef(null);
   const [priceStr, setPriceStr] = useState(() => Number(item.unitPrice).toFixed(2));
   const [priceFocused, setPriceFocused] = useState(false);
@@ -804,10 +805,10 @@ function ItemRow({ item, isEditing, onToggleEdit, onUpdate, onEditChange, onDele
   useEffect(() => {
     if (!isEditing) return;
     function outside(e) {
-      if (rowRef.current && !rowRef.current.contains(e.target)) onToggleEdit();
+      if (rowRef.current && !rowRef.current.contains(e.target)) onClose();
     }
     function onUserScroll() {
-      onToggleEdit();
+      onClose();
     }
     document.addEventListener('mousedown', outside);
     document.addEventListener('touchstart', outside);
@@ -819,7 +820,7 @@ function ItemRow({ item, isEditing, onToggleEdit, onUpdate, onEditChange, onDele
       window.removeEventListener('wheel', onUserScroll);
       window.removeEventListener('touchmove', onUserScroll);
     };
-  }, [isEditing, onToggleEdit]);
+  }, [isEditing, onClose]);
 
   if (!isEditing) {
     return (
