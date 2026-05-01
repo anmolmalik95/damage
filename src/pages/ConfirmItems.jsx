@@ -806,11 +806,18 @@ function ItemRow({ item, isEditing, onToggleEdit, onUpdate, onEditChange, onDele
     function outside(e) {
       if (rowRef.current && !rowRef.current.contains(e.target)) onToggleEdit();
     }
+    function onUserScroll() {
+      onToggleEdit();
+    }
     document.addEventListener('mousedown', outside);
     document.addEventListener('touchstart', outside);
+    window.addEventListener('wheel', onUserScroll, { passive: true });
+    window.addEventListener('touchmove', onUserScroll, { passive: true });
     return () => {
       document.removeEventListener('mousedown', outside);
       document.removeEventListener('touchstart', outside);
+      window.removeEventListener('wheel', onUserScroll);
+      window.removeEventListener('touchmove', onUserScroll);
     };
   }, [isEditing, onToggleEdit]);
 
@@ -831,7 +838,6 @@ function ItemRow({ item, isEditing, onToggleEdit, onUpdate, onEditChange, onDele
   return (
     <div ref={rowRef} style={styles.itemRowEdit}>
       <input
-        autoFocus
         style={styles.itemNameInput}
         value={item.name}
         onChange={e => { onUpdate('name', e.target.value); onEditChange('name', e.target.value); }}

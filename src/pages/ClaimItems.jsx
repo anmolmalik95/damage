@@ -87,6 +87,31 @@ export default function ClaimItems() {
     if (!currentMemberId) navigate(`/s/${sessionId}`, { replace: true });
   }, [sessionId, currentMemberId, navigate]);
 
+  // Collapse expanded item rows when the user clicks outside any of them or scrolls.
+  useEffect(() => {
+    if (expandedItems.size === 0) return;
+    function maybeCollapse(e) {
+      const expandedEls = document.querySelectorAll('[data-expanded-item="true"]');
+      for (const el of expandedEls) {
+        if (el.contains(e.target)) return;
+      }
+      setExpandedItems(new Set());
+    }
+    function onUserScroll() {
+      setExpandedItems(new Set());
+    }
+    document.addEventListener('mousedown', maybeCollapse);
+    document.addEventListener('touchstart', maybeCollapse);
+    window.addEventListener('wheel', onUserScroll, { passive: true });
+    window.addEventListener('touchmove', onUserScroll, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', maybeCollapse);
+      document.removeEventListener('touchstart', maybeCollapse);
+      window.removeEventListener('wheel', onUserScroll);
+      window.removeEventListener('touchmove', onUserScroll);
+    };
+  }, [expandedItems.size]);
+
   // Firestore listeners
   useEffect(() => {
     if (!currentMemberId) return;
@@ -573,7 +598,7 @@ export default function ClaimItems() {
             const attribution = claimAttribution(item.id);
 
             return (
-              <div key={item.id}>
+              <div key={item.id} data-expanded-item={isExpanded ? 'true' : undefined}>
                 <div
                   role="button"
                   tabIndex={0}
