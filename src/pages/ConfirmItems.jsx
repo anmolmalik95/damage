@@ -813,18 +813,11 @@ function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChang
       if (e.target.closest('[data-row]')) return;
       onClose();
     }
-    function onUserScroll() {
-      onClose();
-    }
     document.addEventListener('mousedown', outside);
     document.addEventListener('touchstart', outside);
-    window.addEventListener('wheel', onUserScroll, { passive: true });
-    window.addEventListener('touchmove', onUserScroll, { passive: true });
     return () => {
       document.removeEventListener('mousedown', outside);
       document.removeEventListener('touchstart', outside);
-      window.removeEventListener('wheel', onUserScroll);
-      window.removeEventListener('touchmove', onUserScroll);
     };
   }, [isEditing, onClose]);
 

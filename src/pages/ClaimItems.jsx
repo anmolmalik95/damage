@@ -87,28 +87,22 @@ export default function ClaimItems() {
     if (!currentMemberId) navigate(`/s/${sessionId}`, { replace: true });
   }, [sessionId, currentMemberId, navigate]);
 
-  // Collapse expanded item rows when the user clicks outside any of them or scrolls.
+  // Collapse expanded item rows when the user clicks outside any row.
+  // Tap-on-another-row is handled by that row's own onClick (via toggleItem),
+  // which replaces the expanded set, so we skip the global collapse there to
+  // avoid setting state on touchstart/mousedown — that would shift layout
+  // before the click resolves and break the tap target on iOS.
   useEffect(() => {
     if (expandedItems.size === 0) return;
     function maybeCollapse(e) {
-      const expandedEls = document.querySelectorAll('[data-expanded-item="true"]');
-      for (const el of expandedEls) {
-        if (el.contains(e.target)) return;
-      }
-      setExpandedItems(new Set());
-    }
-    function onUserScroll() {
+      if (e.target.closest('[data-row]')) return;
       setExpandedItems(new Set());
     }
     document.addEventListener('mousedown', maybeCollapse);
     document.addEventListener('touchstart', maybeCollapse);
-    window.addEventListener('wheel', onUserScroll, { passive: true });
-    window.addEventListener('touchmove', onUserScroll, { passive: true });
     return () => {
       document.removeEventListener('mousedown', maybeCollapse);
       document.removeEventListener('touchstart', maybeCollapse);
-      window.removeEventListener('wheel', onUserScroll);
-      window.removeEventListener('touchmove', onUserScroll);
     };
   }, [expandedItems.size]);
 
@@ -276,7 +270,9 @@ export default function ClaimItems() {
   }
 
   function toggleItem(id) {
-    setExpandedItems(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    // One row expanded at a time: tapping the open row collapses it,
+    // tapping any other row replaces the set with just that row.
+    setExpandedItems(p => p.has(id) ? new Set() : new Set([id]));
   }
   function togglePerson(id) {
     setExpandedPersons(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -598,7 +594,7 @@ export default function ClaimItems() {
             const attribution = claimAttribution(item.id);
 
             return (
-              <div key={item.id} data-expanded-item={isExpanded ? 'true' : undefined}>
+              <div key={item.id} data-row="true">
                 <div
                   role="button"
                   tabIndex={0}
