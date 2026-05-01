@@ -216,6 +216,7 @@ export default function Breakdown() {
     }
     const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
     const transactions = [];
+    if (people.length === 0) return transactions;
     for (let i = 0; i < 500; i++) {
       const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
       const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
@@ -424,14 +425,16 @@ export default function Breakdown() {
 
     const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
     const finalTransactions = [];
-    for (let i = 0; i < 500; i++) {
-      const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
-      const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
-      if (creditor.bal < 0.005 || debtor.bal > -0.005) break;
-      const amount = Math.min(creditor.bal, -debtor.bal);
-      finalTransactions.push({ fromId: debtor.id, toId: creditor.id, amount: Math.round(amount * 100) / 100 });
-      creditor.bal -= amount;
-      debtor.bal += amount;
+    if (people.length > 0) {
+      for (let i = 0; i < 500; i++) {
+        const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
+        const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
+        if (creditor.bal < 0.005 || debtor.bal > -0.005) break;
+        const amount = Math.min(creditor.bal, -debtor.bal);
+        finalTransactions.push({ fromId: debtor.id, toId: creditor.id, amount: Math.round(amount * 100) / 100 });
+        creditor.bal -= amount;
+        debtor.bal += amount;
+      }
     }
 
     const rawDebtOwed = {};
@@ -686,10 +689,10 @@ export default function Breakdown() {
             >
               <div style={s.cardLeft}>
                 <div style={{ ...s.avatar, backgroundColor: avatarCol }}>
-                  {member.name.charAt(0).toUpperCase()}
+                  {member.name?.charAt(0)?.toUpperCase() ?? '?'}
                 </div>
                 <span style={s.memberName}>
-                  {member.name}{isMe ? ' (you)' : ''}
+                  {member.name ?? 'Unnamed'}{isMe ? ' (you)' : ''}
                 </span>
               </div>
               <div style={s.cardRight}>
@@ -730,7 +733,7 @@ export default function Breakdown() {
                   <div style={s.expandedContent}>
                     {memberVenueData.map(({ venue, data }, vi) => (
                       <div key={venue.id} style={vi > 0 ? { marginTop: '12px' } : {}}>
-                        <div style={s.venueSubLabel}>{venue.name.toUpperCase()}</div>
+                        <div style={s.venueSubLabel}>{(venue.name ?? 'Venue').toUpperCase()}</div>
                         {data.itemRows.map((row, i) => (
                           <div key={i} style={s.itemRow}>
                             <div style={s.itemLeft}>

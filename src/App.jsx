@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { NavigationProvider } from './context/NavigationContext';
 import OfflineBanner from './components/OfflineBanner';
+import ErrorBoundary from './components/ErrorBoundary';
 import Home from './pages/Home';
 import NewSession from './pages/NewSession';
 import SessionView from './pages/SessionView';
@@ -30,7 +31,8 @@ function AppRoutes() {
   const location = useLocation();
   return (
     <AnimatePresence mode="wait" initial={false}>
-      <Routes location={location} key={location.key}>
+      <ErrorBoundary key={location.key}>
+        <Routes location={location} key={location.key}>
         <Route path="/" element={<Home />} />
         <Route path="/session/new" element={<NewSession />} />
         <Route path="/session/:sessionId" element={<SessionView />} />
@@ -53,7 +55,8 @@ function AppRoutes() {
         <Route path="/reconcile/settlement" element={<ReconcileSettlement />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/existing-sessions" element={<ExistingSessions />} />
-      </Routes>
+        </Routes>
+      </ErrorBoundary>
     </AnimatePresence>
   );
 }
