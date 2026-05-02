@@ -5,12 +5,14 @@ import { useNavigation } from '../context/NavigationContext';
 import { useToast } from '../context/ToastContext';
 import SkeletonBlock from '../components/SkeletonBlock';
 import {
-  collection, doc, getDocs, onSnapshot, setDoc, updateDoc, serverTimestamp,
+  collection, doc, getDocs, onSnapshot, setDoc, updateDoc, deleteDoc, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
+import TransfersModal from '../components/TransfersModal';
 import { BRAND_NAME } from '../brand';
 import { clickKey } from '../utils/a11y';
+import { computeTransfers, transferKey, planLegacyMigration, buildRawDebts } from '../utils/transfers';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -44,7 +46,7 @@ export default function Breakdown() {
   const [billPayersSheetOpen, setBillPayersSheetOpen] = useState(false);
   const [venueBillPayers, setVenueBillPayers] = useState({});
   const [cabItemPayers, setCabItemPayers] = useState({});
-  const [settleUpExpanded, setSettleUpExpanded] = useState(false);
+  const [transfersModalOpen, setTransfersModalOpen] = useState(false);
 
   useEffect(() => {
     document.title = session?.name ? `Breakdown · ${session.name} — ${BRAND_NAME}` : BRAND_NAME;
@@ -177,77 +179,73 @@ export default function Breakdown() {
     [venues, computeVenueData]
   );
 
-  const debtTransactions = useMemo(() => {
-    if (!session?.multiPayer) return [];
-
-    const netBalances = {};
-    for (const { venue, memberData } of venueDataMap) {
-      const isTransport = venue.name === 'Transport' || venue.isTransport;
-      if (isTransport) {
-        for (const item of venue.items) {
-          const itemBillPayer = item.billPayer;
-          if (!itemBillPayer) continue;
-          const itemClaims = claims.filter(c => c.itemId === item.id);
-          for (const claim of itemClaims) {
-            if (claim.type === 'whole') {
-              const debtor = claim.memberId;
-              if (debtor === itemBillPayer) continue;
-              netBalances[debtor] = (netBalances[debtor] || 0) - (item.unitPrice ?? 0);
-              netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + (item.unitPrice ?? 0);
-            } else if (claim.type === 'shared') {
-              const share = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
-              for (const debtor of (claim.sharedWith || [])) {
-                if (debtor === itemBillPayer) continue;
-                netBalances[debtor] = (netBalances[debtor] || 0) - share;
-                netBalances[itemBillPayer] = (netBalances[itemBillPayer] || 0) + share;
-              }
-            }
-          }
-        }
-      } else {
-        const vBillPayer = venue.billPayer;
-        if (!vBillPayer) continue;
-        for (const [memberId, data] of Object.entries(memberData)) {
-          if (memberId === vBillPayer) continue;
-          netBalances[memberId] = (netBalances[memberId] || 0) - data.total;
-          netBalances[vBillPayer] = (netBalances[vBillPayer] || 0) + data.total;
-        }
-      }
-    }
-    const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
-    const transactions = [];
-    if (people.length === 0) return transactions;
-    for (let i = 0; i < 500; i++) {
-      const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
-      const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
-      if (creditor.bal < 0.005 || debtor.bal > -0.005) break;
-      const amount = Math.min(creditor.bal, -debtor.bal);
-      transactions.push({ fromId: debtor.id, toId: creditor.id, amount: Math.round(amount * 100) / 100 });
-      creditor.bal -= amount;
-      debtor.bal += amount;
-    }
-    return transactions;
-  }, [session?.multiPayer, venueDataMap, claims]);
-
-  async function togglePaid(memberId) {
-    const cur = paidStatus[memberId]?.paid ?? false;
-    await setDoc(doc(db, 'sessions', sessionId, 'breakdown', memberId), {
-      paid: !cur,
-      paidAt: !cur ? serverTimestamp() : null,
+  const transfers = useMemo(() => {
+    if (!session || venues.length === 0) return [];
+    return computeTransfers({
+      venues,
+      claims,
+      sessionBillPayer: session.billPayer,
+      isMultiPayer: !!session.multiPayer,
+      paidStatus,
     });
-  }
+  }, [session, venues, claims, paidStatus]);
 
-  async function handleSelfReportPaid() {
-    const myData = paidStatus[currentMemberId] ?? {};
-    const isPaid = myData.paid ?? false;
-    const isSelfReported = myData.selfReported ?? false;
-    if (isPaid && isSelfReported) {
-      await setDoc(doc(db, 'sessions', sessionId, 'breakdown', currentMemberId), {
-        paid: false, selfReported: false, paidAt: null,
+  const nettingOccurred = useMemo(() => {
+    if (!session || venues.length === 0) return false;
+    const rawDebts = buildRawDebts({
+      venues,
+      claims,
+      sessionBillPayer: session.billPayer,
+      isMultiPayer: !!session.multiPayer,
+    });
+    return new Set(rawDebts.map(d => d.creditorId)).size > 1;
+  }, [session, venues, claims]);
+
+  // One-shot migration: convert legacy `breakdown/{memberId}` docs to the new
+  // `breakdown/{debtorId}__{creditorId}` shape. Idempotent — the planner
+  // returns empty work once all legacy docs are gone. setDoc/deleteDoc are
+  // safe under concurrent viewers since both write the same data.
+  const migrationRunRef = useRef(false);
+  useEffect(() => {
+    if (migrationRunRef.current) return;
+    if (!session || transfers.length === 0) return;
+    const plan = planLegacyMigration({ paidStatus, transfers });
+    if (plan.writes.length === 0 && plan.deletes.length === 0) return;
+
+    migrationRunRef.current = true;
+    (async () => {
+      try {
+        await Promise.all([
+          ...plan.writes.map(w =>
+            setDoc(doc(db, 'sessions', sessionId, 'breakdown', w.id), w.data)
+          ),
+          ...plan.deletes.map(id =>
+            deleteDoc(doc(db, 'sessions', sessionId, 'breakdown', id))
+          ),
+        ]);
+      } catch (err) {
+        console.error('breakdown migration failed', err);
+        migrationRunRef.current = false;
+      }
+    })();
+  }, [session, transfers, paidStatus, sessionId]);
+
+  // Marking paid snapshots the current required amount as paidAmount.
+  // Dismissing a reconcile pill is the same write — it bumps paidAmount to the
+  // current required so future reopens compute deltas from the new baseline.
+  async function setTransferPaid(transfer, paid) {
+    const id = transferKey(transfer.fromId, transfer.toId);
+    if (paid) {
+      await setDoc(doc(db, 'sessions', sessionId, 'breakdown', id), {
+        paid: true,
+        paidAmount: transfer.requiredAmount,
+        paidAt: serverTimestamp(),
       });
     } else {
-      await setDoc(doc(db, 'sessions', sessionId, 'breakdown', currentMemberId), {
-        paid: true, selfReported: true, paidAt: serverTimestamp(),
+      await setDoc(doc(db, 'sessions', sessionId, 'breakdown', id), {
+        paid: false,
+        paidAmount: 0,
+        paidAt: null,
       });
     }
   }
@@ -370,76 +368,23 @@ export default function Breakdown() {
     }
   }
 
-  // Build raw per-venue/per-item debt edges (before simplification)
-  function buildRawDebts() {
-    if (!session.multiPayer) return [];
-    const rawDebts = [];
-    for (const { venue, memberData } of venueDataMap) {
-      const isTransport = venue.name === 'Transport' || venue.isTransport;
-      if (isTransport) {
-        for (const item of venue.items) {
-          const itemBillPayer = item.billPayer;
-          if (!itemBillPayer) continue;
-          const itemClaims = claims.filter(c => c.itemId === item.id);
-          for (const claim of itemClaims) {
-            if (claim.type === 'whole') {
-              const debtor = claim.memberId;
-              if (debtor === itemBillPayer) continue;
-              rawDebts.push({ debtorId: debtor, creditorId: itemBillPayer, amount: item.unitPrice ?? 0, label: item.name });
-            } else if (claim.type === 'shared') {
-              const share = (item.unitPrice ?? 0) / (claim.sharedWith?.length || 1);
-              for (const debtor of (claim.sharedWith || [])) {
-                if (debtor === itemBillPayer) continue;
-                rawDebts.push({ debtorId: debtor, creditorId: itemBillPayer, amount: share, label: item.name });
-              }
-            }
-          }
-        }
-      } else {
-        const vBillPayer = venue.billPayer;
-        if (!vBillPayer) continue;
-        for (const [memberId, data] of Object.entries(memberData)) {
-          if (memberId === vBillPayer) continue;
-          rawDebts.push({ debtorId: memberId, creditorId: vBillPayer, amount: data.total, label: venue.name });
-        }
-      }
-    }
-    return rawDebts;
-  }
-
-  const rawDebts = session.multiPayer ? buildRawDebts() : [];
-  const sessionNettingOccurred = session.multiPayer && new Set(rawDebts.map(d => d.creditorId)).size > 1;
+  const rawDebts = session.multiPayer
+    ? buildRawDebts({ venues, claims, sessionBillPayer: session.billPayer, isMultiPayer: true })
+    : [];
 
   const isDebug = new URLSearchParams(location.search).get('debug') === 'true';
 
   function buildDebugData() {
     if (!session.multiPayer) return null;
     const name = id => members.find(m => m.id === id)?.name ?? id;
-    const rawDebts = buildRawDebts();
-
     const netBalances = {};
     rawDebts.forEach(d => {
       netBalances[d.debtorId] = (netBalances[d.debtorId] || 0) - d.amount;
       netBalances[d.creditorId] = (netBalances[d.creditorId] || 0) + d.amount;
     });
-
-    const people = Object.entries(netBalances).map(([id, bal]) => ({ id, bal }));
-    const finalTransactions = [];
-    if (people.length > 0) {
-      for (let i = 0; i < 500; i++) {
-        const creditor = people.reduce((a, b) => b.bal > a.bal ? b : a);
-        const debtor = people.reduce((a, b) => b.bal < a.bal ? b : a);
-        if (creditor.bal < 0.005 || debtor.bal > -0.005) break;
-        const amount = Math.min(creditor.bal, -debtor.bal);
-        finalTransactions.push({ fromId: debtor.id, toId: creditor.id, amount: Math.round(amount * 100) / 100 });
-        creditor.bal -= amount;
-        debtor.bal += amount;
-      }
-    }
-
     const rawDebtOwed = {};
     rawDebts.forEach(d => { rawDebtOwed[d.debtorId] = (rawDebtOwed[d.debtorId] || 0) + d.amount; });
-
+    const finalTransactions = transfers.map(t => ({ fromId: t.fromId, toId: t.toId, amount: t.requiredAmount }));
     return { rawDebts, netBalances, finalTransactions, rawDebtOwed, name };
   }
 
@@ -478,139 +423,87 @@ export default function Breakdown() {
         </button>
       </div>
 
-      {/* Single-payer: Settle up card */}
-      {!isReadOnly && !session.multiPayer && session.billPayer && currentMemberId !== session.billPayer && (() => {
-        const billPayer = members.find(m => m.id === session.billPayer);
-        const instr = billPayer?.paymentInstructions ?? session.paymentInstructions;
+      {/* Settlement progress bar — tappable, opens transfers modal */}
+      {transfers.length > 0 && (() => {
+        const settledCount = transfers.filter(t => t.status === 'paid').length;
+        const totalCount = transfers.length;
+        const allDone = settledCount === totalCount;
+        const fillPct = totalCount > 0 ? (settledCount / totalCount) * 100 : 0;
         return (
-          <div style={s.owesCard}>
-            <div style={s.settleUpTitle}>Settle up</div>
-            <div style={s.payRow}>
-              <span style={s.payRowName}>Pay {billPayer?.name ?? '?'}</span>
-              <span style={s.payRowAmt}>${(grandTotals[currentMemberId] ?? 0).toFixed(2)}</span>
+          <button
+            type="button"
+            style={s.progressWrap}
+            onClick={() => setTransfersModalOpen(true)}
+            aria-label="Open all transfers"
+          >
+            <div style={s.progressOuter}>
+              <div style={{ ...s.progressFill, width: `${fillPct}%`, backgroundColor: allDone ? '#27500A' : 'var(--text-primary)' }}>
+                {fillPct >= 30 && (
+                  <span style={{ ...s.progressTextInside, color: allDone ? '#fff' : 'var(--bg-primary)' }}>
+                    {settledCount} of {totalCount} settled
+                  </span>
+                )}
+              </div>
+              {fillPct < 30 && (
+                <span style={s.progressTextOutside}>{settledCount} of {totalCount} settled</span>
+              )}
             </div>
-            {instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
-          </div>
+            <div style={s.progressHint}>Tap to view all transfers</div>
+          </button>
         );
       })()}
 
-      {/* Multi-payer: settle up card or settled message */}
-      {!isReadOnly && session.multiPayer && (() => {
-        const myTransactions = debtTransactions.filter(t => t.fromId === currentMemberId || t.toId === currentMemberId);
-        const myOwingTransactions = myTransactions.filter(t => t.fromId === currentMemberId);
-        const myCreditTransactions = myTransactions.filter(t => t.toId === currentMemberId);
-
-        if (myTransactions.length === 0) {
+      {/* Settle up & You're owed panels */}
+      {!isReadOnly && transfers.length > 0 && (() => {
+        const myOwing = transfers.filter(t => t.fromId === currentMemberId);
+        const myCredit = transfers.filter(t => t.toId === currentMemberId);
+        if (myOwing.length === 0 && myCredit.length === 0) {
           return (
             <div style={{ ...s.owesCard, marginBottom: '16px' }}>
               <div style={s.settleUpTitle}>You're all settled ✓</div>
-              <div style={s.owesAmount}>No outstanding debts</div>
+              <div style={s.owesAmount}>No outstanding transfers</div>
             </div>
           );
         }
-
-        const myRawDebts = rawDebts.filter(d => d.debtorId === currentMemberId);
-        const myRawCreditorIds = new Set(myRawDebts.map(d => d.creditorId));
-        const nettingForMe = myOwingTransactions.length > 0 && (myRawCreditorIds.size > 1 || myOwingTransactions.some(t => !myRawCreditorIds.has(t.toId)));
-
         return (
           <>
-            {myOwingTransactions.length > 0 && (
+            {myOwing.length > 0 && (
               <div style={{ ...s.owesCard, marginBottom: '12px' }}>
                 <div style={s.settleUpTitle}>Settle up</div>
-                {nettingForMe && <div style={s.settleUpSubline}>Simplified to fewest transfers</div>}
-                {myOwingTransactions.map((t, i) => {
+                {nettingOccurred && <div style={s.settleUpSubline}>Simplified to fewest transfers</div>}
+                {myOwing.map((t, i) => {
                   const creditor = members.find(m => m.id === t.toId);
                   const instr = creditor?.paymentInstructions;
                   return (
-                    <div key={i} style={i > 0 ? { marginTop: '8px' } : {}}>
-                      <div style={s.payRow}>
-                        <span style={s.payRowName}>Pay {creditor?.name ?? '?'}</span>
-                        <span style={s.payRowAmt}>${t.amount.toFixed(2)}</span>
-                      </div>
-                      {instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
-                    </div>
+                    <TransferRow
+                      key={`${t.fromId}__${t.toId}`}
+                      transfer={t}
+                      partyName={creditor?.name ?? '?'}
+                      direction="owing"
+                      instr={instr}
+                      onSetPaid={(paid) => setTransferPaid(t, paid)}
+                      isFirst={i === 0}
+                    />
                   );
                 })}
-                {nettingForMe && (
-                  <>
-                    <div style={s.settleUpDivider} />
-                    <button style={s.showCalcBtn} onClick={() => setSettleUpExpanded(x => !x)}>
-                      {settleUpExpanded ? 'Hide calculation ∨' : 'Show how this was calculated ›'}
-                    </button>
-                    <AnimatePresence initial={false}>
-                      {settleUpExpanded && (
-                        <motion.div
-                          key="calc-expand"
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
-                          style={{ overflow: 'hidden' }}
-                        >
-                          <div style={{ paddingTop: '12px' }}>
-                            <div style={s.calcSectionLabel}>How we got here:</div>
-                            <div style={s.calcSubLabel}>What you actually owe per venue:</div>
-                            {myRawDebts.map((d, i) => {
-                              const creditorName = members.find(m => m.id === d.creditorId)?.name ?? '?';
-                              return (
-                                <div key={i} style={s.calcRow}>
-                                  <span style={s.calcRowLabel}>{d.label} (owed to {creditorName})</span>
-                                  <span style={s.calcRowAmt}>${d.amount.toFixed(2)}</span>
-                                </div>
-                              );
-                            })}
-                            <div style={{ ...s.calcRow, borderTop: '0.5px solid var(--border-color)', marginTop: '4px', paddingTop: '6px' }}>
-                              <span style={{ ...s.calcRowLabel, fontWeight: 500 }}>Total owed</span>
-                              <span style={{ ...s.calcRowAmt, fontWeight: 500 }}>${myRawDebts.reduce((sum, d) => sum + d.amount, 0).toFixed(2)}</span>
-                            </div>
-                            <div style={{ ...s.calcSubLabel, marginTop: '12px' }}>Simplification applied:</div>
-                            {(() => {
-                              const finalCreditorIds = new Set(myOwingTransactions.map(t => t.toId));
-                              const absorbedNames = [...myRawCreditorIds].filter(id => !finalCreditorIds.has(id)).map(id => members.find(m => m.id === id)?.name ?? '?');
-                              const finalCreditorNames = myOwingTransactions.map(t => members.find(m => m.id === t.toId)?.name ?? '?');
-                              const rawCount = myRawDebts.length;
-                              const finalCount = myOwingTransactions.length;
-                              const explanation = absorbedNames.length > 0 && finalCount === 1
-                                ? `${absorbedNames.join(' & ')}'s payment absorbed into ${finalCreditorNames[0]}'s to reduce total transfers needed.`
-                                : `Your ${rawCount} separate transfer${rawCount !== 1 ? 's' : ''} consolidated into ${finalCount}.`;
-                              return (
-                                <>
-                                  <div style={s.calcExplain}>Instead of {rawCount} transfer{rawCount !== 1 ? 's' : ''} → {finalCount} transfer{finalCount !== 1 ? 's' : ''}</div>
-                                  <div style={s.calcExplain}>{explanation}</div>
-                                </>
-                              );
-                            })()}
-                            <div style={{ ...s.calcSubLabel, marginTop: '12px' }}>Net result:</div>
-                            {myOwingTransactions.map((t, i) => {
-                              const creditorName = members.find(m => m.id === t.toId)?.name ?? '?';
-                              return (
-                                <div key={i} style={s.calcRow}>
-                                  <span style={s.calcRowLabel}>Pay {creditorName}</span>
-                                  <span style={s.calcRowAmt}>${t.amount.toFixed(2)}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </>
-                )}
               </div>
             )}
-            {myCreditTransactions.length > 0 && (
+            {myCredit.length > 0 && (
               <div style={{ ...s.owesCard, marginBottom: '12px' }}>
                 <div style={s.settleUpTitle}>You're owed</div>
-                {[...myCreditTransactions]
-                  .sort((a, b) => b.amount - a.amount)
+                {[...myCredit]
+                  .sort((a, b) => b.requiredAmount - a.requiredAmount)
                   .map((t, i) => {
                     const debtor = members.find(m => m.id === t.fromId);
                     return (
-                      <div key={i} style={{ ...s.payRow, ...(i > 0 ? { marginTop: '8px' } : {}) }}>
-                        <span style={s.payRowName}>{debtor?.name ?? '?'}</span>
-                        <span style={s.payRowAmt}>${t.amount.toFixed(2)}</span>
-                      </div>
+                      <TransferRow
+                        key={`${t.fromId}__${t.toId}`}
+                        transfer={t}
+                        partyName={debtor?.name ?? '?'}
+                        direction="credit"
+                        onSetPaid={(paid) => setTransferPaid(t, paid)}
+                        isFirst={i === 0}
+                      />
                     );
                   })}
               </div>
@@ -653,18 +546,10 @@ export default function Breakdown() {
         </div>
       ) : null}
 
-      {/* Helper text when netting occurred */}
-      {sessionNettingOccurred && (
-        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '12px' }}>
-          Amounts show what each person consumed. See your 'Settle up' card above for what to transfer.
-        </div>
-      )}
-
       {/* Person cards — one per member, all venues combined */}
       {members.map(member => {
         if (!grandTotals[member.id]) return null;
         const grandTotal = grandTotals[member.id];
-        const paid = paidStatus[member.id]?.paid ?? false;
         const isMe = member.id === currentMemberId;
         const avatarIdx = memberIndex[member.id] ?? 0;
         const avatarCol = AVATAR_COLORS[avatarIdx % AVATAR_COLORS.length];
@@ -673,10 +558,17 @@ export default function Breakdown() {
           .map(({ venue, memberData }) => ({ venue, data: memberData[member.id] }))
           .filter(({ data }) => !!data);
 
+        const memberTransfers = transfers.filter(
+          t => t.fromId === member.id || t.toId === member.id
+        );
+        const hasReconcile = memberTransfers.some(t => t.status === 'reconcile');
+        const allSettled = memberTransfers.length > 0
+          && memberTransfers.every(t => t.status === 'paid');
+
         return (
           <div
             key={member.id}
-            style={{ ...s.memberCard, ...(paid ? { border: '0.5px solid #27500A' } : {}) }}
+            style={{ ...s.memberCard, ...(allSettled ? { border: '0.5px solid #27500A' } : {}) }}
           >
             <div
               role="button"
@@ -693,9 +585,17 @@ export default function Breakdown() {
                 <span style={s.memberName}>
                   {member.name ?? 'Unnamed'}{isMe ? ' (you)' : ''}
                 </span>
+                {hasReconcile && (
+                  <span style={s.cardReconcilePill}>Needs reconcile</span>
+                )}
               </div>
               <div style={s.cardRight}>
-                <span style={s.venueTotal}>${grandTotal.toFixed(2)}</span>
+                {!nettingOccurred && (
+                  <span style={s.venueTotal}>${grandTotal.toFixed(2)}</span>
+                )}
+                {allSettled && (
+                  <span style={s.paidTag}>Paid ✓</span>
+                )}
                 <motion.div
                   animate={{ rotate: isExpanded ? 90 : 0 }}
                   transition={{ duration: 0.2, ease: 'easeInOut' }}
@@ -705,17 +605,6 @@ export default function Breakdown() {
                     <path d="M6 4L10 8L6 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 </motion.div>
-                {!isReadOnly && isAdmin && !isClosed && (
-                  <button
-                    style={paid ? s.paidBtn : s.markPaidBtn}
-                    onClick={e => { e.stopPropagation(); togglePaid(member.id); }}
-                  >
-                    {paid ? 'Paid ✓' : 'Mark paid'}
-                  </button>
-                )}
-                {(isReadOnly || !isAdmin) && paid && (
-                  <span style={s.paidTag}>Paid ✓</span>
-                )}
               </div>
             </div>
 
@@ -772,6 +661,42 @@ export default function Breakdown() {
                         </div>
                       </div>
                     ))}
+
+                    {(memberTransfers.length > 0 || nettingOccurred) && (
+                      <div style={s.settlementSection}>
+                        <div style={s.settlementLabel}>SETTLEMENT</div>
+                        {nettingOccurred && (
+                          <div style={s.settlementRow}>
+                            <span style={s.settlementRowLabel}>Total consumed</span>
+                            <span style={s.settlementRowAmt}>${grandTotal.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {memberTransfers.map(t => {
+                          const isOutgoing = t.fromId === member.id;
+                          const otherId = isOutgoing ? t.toId : t.fromId;
+                          const otherName = members.find(m => m.id === otherId)?.name ?? '?';
+                          const verb = isOutgoing ? 'pays' : 'receives from';
+                          return (
+                            <div key={`${t.fromId}__${t.toId}`} style={{ ...s.settlementRow, marginTop: '4px' }}>
+                              <span style={s.settlementRowLabel}>
+                                {isMe ? (isOutgoing ? `You pay ${otherName}` : `${otherName} pays you`) : `${verb} ${otherName}`}
+                              </span>
+                              <span style={s.settlementRowAmt}>
+                                ${t.requiredAmount.toFixed(2)}
+                                {t.status === 'paid' && <span style={s.settlementStatusPaid}> · Paid ✓</span>}
+                                {t.status === 'pending' && <span style={s.settlementStatusPending}> · Pending</span>}
+                                {t.status === 'reconcile' && <span style={s.settlementStatusReconcile}> · Reconcile</span>}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {memberTransfers.some(t => t.status === 'reconcile') && (
+                          <div style={s.settlementReconcileNote}>
+                            Amount changed since marked paid. Open the transfers list to square up.
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -779,28 +704,6 @@ export default function Breakdown() {
           </div>
         );
       })}
-
-      {/* I've paid — non-bill-payer, non-admin only */}
-      {(() => {
-        if (isReadOnly || isAdmin || isBillPayer) return null;
-        const myData = paidStatus[currentMemberId] ?? {};
-        const myPaid = myData.paid ?? false;
-        const mySelfReported = myData.selfReported ?? false;
-        if (myPaid && !mySelfReported) return null;
-        return (
-          <div style={s.selfPaidWrap}>
-            <button
-              style={myPaid && mySelfReported ? s.selfPaidDoneBtn : s.selfPaidBtn}
-              onClick={handleSelfReportPaid}
-            >
-              {myPaid && mySelfReported ? "Marked as paid ✓ · Undo" : "I've paid"}
-            </button>
-            {!(myPaid && mySelfReported) && (
-              <div style={s.selfPaidHint}>Let the group know you've settled up.</div>
-            )}
-          </div>
-        );
-      })()}
 
       {/* Bottom buttons */}
       <div style={s.bottomBtns}>
@@ -1086,11 +989,11 @@ export default function Breakdown() {
             ) : <div style={s.debugRow}>— n/a —</div>}
 
             <div style={s.debugSection}>Final transactions:</div>
-            {debtTransactions.length === 0
+            {transfers.length === 0
               ? <div style={s.debugRow}>— none —</div>
-              : debtTransactions.map((t, i) => (
+              : transfers.map((t, i) => (
                   <div key={i} style={s.debugRow}>
-                    {name(t.fromId)} pays {name(t.toId)} ${t.amount.toFixed(2)}
+                    {name(t.fromId)} pays {name(t.toId)} ${t.requiredAmount.toFixed(2)} {t.status === 'paid' ? '✓' : t.status === 'reconcile' ? `(paid $${t.paidAmount.toFixed(2)} — reconcile)` : ''}
                   </div>
                 ))}
 
@@ -1111,13 +1014,60 @@ export default function Breakdown() {
               <>
                 <div style={s.debugRow}>Netting occurred: {new Set(debugData.rawDebts.map(d => d.creditorId)).size > 1 ? 'YES' : 'NO'}</div>
                 <div style={s.debugRow}>Number of raw creditors: {new Set(debugData.rawDebts.map(d => d.creditorId)).size}</div>
-                <div style={s.debugRow}>Number of final transactions: {debtTransactions.length}</div>
+                <div style={s.debugRow}>Number of final transactions: {transfers.length}</div>
               </>
             ) : <div style={s.debugRow}>— single-payer session —</div>}
           </div>
         );
       })()}
+
+      <TransfersModal
+        open={transfersModalOpen}
+        onClose={() => setTransfersModalOpen(false)}
+        transfers={transfers}
+        members={members}
+        currentMemberId={currentMemberId}
+        isAdmin={isAdmin}
+        onSetPaid={setTransferPaid}
+      />
     </PageContainer>
+  );
+}
+
+function TransferRow({ transfer, partyName, direction, instr, onSetPaid, isFirst }) {
+  const isPaid = transfer.status === 'paid';
+  const isReconcile = transfer.status === 'reconcile';
+  const verbLabel = direction === 'owing' ? `Pay ${partyName}` : partyName;
+  return (
+    <div style={isFirst ? null : { marginTop: '12px' }}>
+      <div style={s.payRow}>
+        <span style={s.payRowName}>{verbLabel}</span>
+        <span style={s.payRowAmt}>${transfer.requiredAmount.toFixed(2)}</span>
+      </div>
+      <div style={s.transferRowActions}>
+        <button
+          style={isPaid ? s.transferPaidBtn : s.transferMarkBtn}
+          onClick={() => onSetPaid(!isPaid)}
+        >
+          {isPaid ? 'Paid ✓' : 'Mark paid'}
+        </button>
+      </div>
+      {isReconcile && (() => {
+        const delta = transfer.requiredAmount - transfer.paidAmount;
+        const short = delta > 0;
+        return (
+          <div style={s.reconcilePillInline}>
+            <div style={s.reconcilePillText}>
+              Paid ${transfer.paidAmount.toFixed(2)} · {short ? `short $${Math.abs(delta).toFixed(2)}` : `over $${Math.abs(delta).toFixed(2)}`}
+            </div>
+            <button style={s.reconcileSquareBtn} onClick={() => onSetPaid(true)}>
+              {short ? 'Mark squared up' : 'Mark refunded'}
+            </button>
+          </div>
+        );
+      })()}
+      {instr ? <div style={s.owesInstr}>💬 {instr}</div> : null}
+    </div>
   );
 }
 
@@ -1214,6 +1164,28 @@ const s = {
   calcRowLabel: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flex: 1, paddingRight: '8px' },
   calcRowAmt: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
   calcExplain: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1.4, marginTop: '2px' },
+  progressWrap: { display: 'block', width: '100%', background: 'none', border: 'none', padding: 0, marginBottom: '16px', cursor: 'pointer', textAlign: 'left' },
+  progressOuter: { position: 'relative', width: '100%', height: '28px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', overflow: 'hidden' },
+  progressFill: { height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: '10px', borderRadius: '6px', transition: 'width 0.3s ease' },
+  progressTextInside: { fontSize: '12px', fontWeight: 600, fontFamily: 'system-ui, -apple-system, sans-serif' },
+  progressTextOutside: { position: 'absolute', top: '50%', left: '10px', transform: 'translateY(-50%)', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  progressHint: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '6px', textAlign: 'center' },
+  cardReconcilePill: { fontSize: '10px', fontWeight: 600, padding: '2px 7px', borderRadius: '4px', backgroundColor: '#FAEEDA', color: '#9A5A1A', fontFamily: 'system-ui, -apple-system, sans-serif', whiteSpace: 'nowrap', flexShrink: 0 },
+  settlementSection: { marginTop: '12px', paddingTop: '12px', borderTop: '0.5px solid var(--border-color)' },
+  settlementLabel: { fontSize: '10px', fontWeight: 500, color: 'var(--text-tertiary)', letterSpacing: '0.06em', textTransform: 'uppercase', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '6px' },
+  settlementRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  settlementRowLabel: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', flex: 1, paddingRight: '8px' },
+  settlementRowAmt: { fontSize: '12px', color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', fontWeight: 500, flexShrink: 0 },
+  settlementStatusPaid: { color: '#27500A', fontWeight: 500 },
+  settlementStatusPending: { color: 'var(--text-tertiary)', fontWeight: 400 },
+  settlementStatusReconcile: { color: '#9A5A1A', fontWeight: 500 },
+  settlementReconcileNote: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '6px', lineHeight: 1.4, fontStyle: 'italic' },
+  transferRowActions: { display: 'flex', justifyContent: 'flex-end', marginTop: '6px' },
+  transferMarkBtn: { backgroundColor: 'var(--bg-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer' },
+  transferPaidBtn: { backgroundColor: '#EAF3DE', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 500, color: '#27500A', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer' },
+  reconcilePillInline: { backgroundColor: '#FAEEDA', borderRadius: '8px', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' },
+  reconcilePillText: { fontSize: '12px', color: '#633806', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  reconcileSquareBtn: { backgroundColor: '#fff', border: '0.5px solid #D9B07E', borderRadius: '6px', padding: '6px 10px', fontSize: '12px', fontWeight: 500, color: '#633806', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', alignSelf: 'flex-start' },
   debugPanel: { marginTop: '32px', padding: '16px', backgroundColor: '#0a0a0a', borderRadius: '10px', border: '1px solid #333' },
   debugTitle: { fontSize: '11px', fontWeight: 700, color: '#a0f0a0', fontFamily: 'monospace', letterSpacing: '0.1em', marginBottom: '8px' },
   debugDivider: { height: '1px', backgroundColor: '#333', marginBottom: '12px' },
