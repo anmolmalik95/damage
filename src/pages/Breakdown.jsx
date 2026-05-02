@@ -465,10 +465,12 @@ export default function Breakdown() {
             </div>
           );
         }
+        const owingAllPaid = myOwing.length > 0 && myOwing.every(t => t.status === 'paid');
+        const creditAllPaid = myCredit.length > 0 && myCredit.every(t => t.status === 'paid');
         return (
           <>
             {myOwing.length > 0 && (
-              <div style={{ ...s.owesCard, marginBottom: '12px' }}>
+              <div style={{ ...s.owesCard, marginBottom: '12px', ...(owingAllPaid ? s.owesCardSettled : null) }}>
                 <div style={s.settleUpTitle}>Settle up</div>
                 {nettingOccurred && <div style={s.settleUpSubline}>Simplified to fewest transfers</div>}
                 {myOwing.map((t, i) => {
@@ -489,7 +491,7 @@ export default function Breakdown() {
               </div>
             )}
             {myCredit.length > 0 && (
-              <div style={{ ...s.owesCard, marginBottom: '12px' }}>
+              <div style={{ ...s.owesCard, marginBottom: '12px', ...(creditAllPaid ? s.owesCardSettled : null) }}>
                 <div style={s.settleUpTitle}>You're owed</div>
                 {[...myCredit]
                   .sort((a, b) => b.requiredAmount - a.requiredAmount)
@@ -592,9 +594,6 @@ export default function Breakdown() {
               <div style={s.cardRight}>
                 {!nettingOccurred && (
                   <span style={s.venueTotal}>${grandTotal.toFixed(2)}</span>
-                )}
-                {allSettled && (
-                  <span style={s.paidTag}>Paid ✓</span>
                 )}
                 <motion.div
                   animate={{ rotate: isExpanded ? 90 : 0 }}
@@ -1039,18 +1038,18 @@ function TransferRow({ transfer, partyName, direction, instr, onSetPaid, isFirst
   const isReconcile = transfer.status === 'reconcile';
   const verbLabel = direction === 'owing' ? `Pay ${partyName}` : partyName;
   return (
-    <div style={isFirst ? null : { marginTop: '12px' }}>
+    <div style={isFirst ? null : { marginTop: '10px' }}>
       <div style={s.payRow}>
         <span style={s.payRowName}>{verbLabel}</span>
-        <span style={s.payRowAmt}>${transfer.requiredAmount.toFixed(2)}</span>
-      </div>
-      <div style={s.transferRowActions}>
-        <button
-          style={isPaid ? s.transferPaidBtn : s.transferMarkBtn}
-          onClick={() => onSetPaid(!isPaid)}
-        >
-          {isPaid ? 'Paid ✓' : 'Mark paid'}
-        </button>
+        <div style={s.payRowRight}>
+          <span style={s.payRowAmt}>${transfer.requiredAmount.toFixed(2)}</span>
+          <button
+            style={isPaid ? s.transferPaidBtn : s.transferMarkBtn}
+            onClick={() => onSetPaid(!isPaid)}
+          >
+            {isPaid ? 'Paid ✓' : 'Mark paid'}
+          </button>
+        </div>
       </div>
       {isReconcile && (() => {
         const delta = transfer.requiredAmount - transfer.paidAmount;
@@ -1096,6 +1095,7 @@ const s = {
   receiptsBtn: { background: 'none', border: 'none', fontSize: '11px', color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'system-ui, -apple-system, sans-serif', padding: '0', marginLeft: 'auto', flexShrink: 0 },
   instrTextarea: { width: '100%', padding: '8px 10px', fontSize: '13px', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', outline: 'none', resize: 'none', boxSizing: 'border-box', colorScheme: 'light dark' },
   owesCard: { backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', padding: '14px 16px', marginBottom: '16px', border: '0.5px solid var(--border-color)' },
+  owesCardSettled: { border: '0.5px solid #27500A' },
   owesPayName: { fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
   owesAmount: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '2px' },
   owesInstr: { fontSize: '13px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '8px', paddingTop: '8px', borderTop: '0.5px solid var(--border-color)' },
@@ -1180,9 +1180,9 @@ const s = {
   settlementStatusPending: { color: 'var(--text-tertiary)', fontWeight: 400 },
   settlementStatusReconcile: { color: '#9A5A1A', fontWeight: 500 },
   settlementReconcileNote: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '6px', lineHeight: 1.4, fontStyle: 'italic' },
-  transferRowActions: { display: 'flex', justifyContent: 'flex-end', marginTop: '6px' },
-  transferMarkBtn: { backgroundColor: 'var(--bg-primary)', border: '0.5px solid var(--border-color)', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer' },
-  transferPaidBtn: { backgroundColor: '#EAF3DE', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 500, color: '#27500A', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer' },
+  payRowRight: { display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 },
+  transferMarkBtn: { backgroundColor: 'var(--text-primary)', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 500, color: 'var(--bg-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', whiteSpace: 'nowrap' },
+  transferPaidBtn: { backgroundColor: '#EAF3DE', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 500, color: '#27500A', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', whiteSpace: 'nowrap' },
   reconcilePillInline: { backgroundColor: '#FAEEDA', borderRadius: '8px', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' },
   reconcilePillText: { fontSize: '12px', color: '#633806', fontFamily: 'system-ui, -apple-system, sans-serif' },
   reconcileSquareBtn: { backgroundColor: '#fff', border: '0.5px solid #D9B07E', borderRadius: '6px', padding: '6px 10px', fontSize: '12px', fontWeight: 500, color: '#633806', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', alignSelf: 'flex-start' },
