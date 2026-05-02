@@ -12,7 +12,7 @@ import PageContainer from '../components/PageContainer';
 import TransfersModal from '../components/TransfersModal';
 import { BRAND_NAME } from '../brand';
 import { clickKey } from '../utils/a11y';
-import { computeTransfers, transferKey, planLegacyMigration, buildRawDebts } from '../utils/transfers';
+import { computeTransfers, transferKey, planLegacyMigration, buildRawDebts, computeMemberPaid } from '../utils/transfers';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -661,41 +661,90 @@ export default function Breakdown() {
                       </div>
                     ))}
 
-                    {(memberTransfers.length > 0 || nettingOccurred) && (
-                      <div style={s.settlementSection}>
-                        <div style={s.settlementLabel}>SETTLEMENT</div>
-                        {nettingOccurred && (
+                    {(memberTransfers.length > 0 || nettingOccurred) && (() => {
+                      const paid = computeMemberPaid({
+                        memberId: member.id,
+                        venues,
+                        sessionBillPayer: session.billPayer,
+                        isMultiPayer: !!session.multiPayer,
+                      });
+                      const netSigned = grandTotal - paid.total;
+                      const youThey = isMe ? 'You' : member.name ?? '?';
+                      return (
+                        <div style={s.settlementSection}>
+                          <div style={s.settlementLabel}>SETTLEMENT</div>
                           <div style={s.settlementRow}>
                             <span style={s.settlementRowLabel}>Total consumed</span>
                             <span style={s.settlementRowAmt}>${grandTotal.toFixed(2)}</span>
                           </div>
-                        )}
-                        {memberTransfers.map(t => {
-                          const isOutgoing = t.fromId === member.id;
-                          const otherId = isOutgoing ? t.toId : t.fromId;
-                          const otherName = members.find(m => m.id === otherId)?.name ?? '?';
-                          const verb = isOutgoing ? 'pays' : 'receives from';
-                          return (
-                            <div key={`${t.fromId}__${t.toId}`} style={{ ...s.settlementRow, marginTop: '4px' }}>
+                          {paid.sources.map((src, i) => (
+                            <div key={i} style={{ ...s.settlementRow, marginTop: '2px' }}>
                               <span style={s.settlementRowLabel}>
-                                {isMe ? (isOutgoing ? `You pay ${otherName}` : `${otherName} pays you`) : `${verb} ${otherName}`}
+                                {isMe ? `You paid for ${src.label}` : `${member.name ?? '?'} paid for ${src.label}`}
                               </span>
-                              <span style={s.settlementRowAmt}>
-                                ${t.requiredAmount.toFixed(2)}
-                                {t.status === 'paid' && <span style={s.settlementStatusPaid}> · Paid ✓</span>}
-                                {t.status === 'pending' && <span style={s.settlementStatusPending}> · Pending</span>}
-                                {t.status === 'reconcile' && <span style={s.settlementStatusReconcile}> · Reconcile</span>}
+                              <span style={s.settlementRowAmt}>−${src.amount.toFixed(2)}</span>
+                            </div>
+                          ))}
+                          {paid.total > 0.005 && (
+                            <div style={{ ...s.settlementRow, marginTop: '6px', paddingTop: '6px', borderTop: '0.5px solid var(--border-color)' }}>
+                              <span style={{ ...s.settlementRowLabel, fontWeight: 500, color: 'var(--text-primary)' }}>
+                                {netSigned >= 0
+                                  ? (isMe ? 'Net you owe' : `Net ${youThey} owes`)
+                                  : (isMe ? 'Net owed to you' : `Net owed to ${youThey}`)}
+                              </span>
+                              <span style={{ ...s.settlementRowAmt, fontWeight: 600 }}>
+                                ${Math.abs(netSigned).toFixed(2)}
                               </span>
                             </div>
-                          );
-                        })}
-                        {memberTransfers.some(t => t.status === 'reconcile') && (
-                          <div style={s.settlementReconcileNote}>
-                            Amount changed since marked paid. Open the transfers list to square up.
-                          </div>
-                        )}
-                      </div>
-                    )}
+                          )}
+                          {memberTransfers.length > 0 && (
+                            <div style={{ marginTop: '10px' }}>
+                              {memberTransfers.map(t => {
+                                const isOutgoing = t.fromId === member.id;
+                                const otherId = isOutgoing ? t.toId : t.fromId;
+                                const otherName = members.find(m => m.id === otherId)?.name ?? '?';
+                                const verb = isOutgoing ? 'pays' : 'receives from';
+                                return (
+                                  <div key={`${t.fromId}__${t.toId}`} style={{ ...s.settlementRow, marginTop: '4px' }}>
+                                    <span style={s.settlementRowLabel}>
+                                      {isMe ? (isOutgoing ? `You pay ${otherName}` : `${otherName} pays you`) : `${verb} ${otherName}`}
+                                    </span>
+                                    <span style={s.settlementRowAmt}>
+                                      ${t.requiredAmount.toFixed(2)}
+                                      {t.status === 'paid' && <span style={s.settlementStatusPaid}> · Paid ✓</span>}
+                                      {t.status === 'pending' && <span style={s.settlementStatusPending}> · Pending</span>}
+                                      {t.status === 'reconcile' && <span style={s.settlementStatusReconcile}> · Reconcile</span>}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {nettingOccurred && memberTransfers.length > 0 && paid.total > 0.005 && (() => {
+                            // Explain the routing when the member is owed money by people other than
+                            // the creditor(s) they end up transacting with — those debts get routed.
+                            const memberRawCreditsFrom = rawDebts.filter(d => d.creditorId === member.id);
+                            const directParties = new Set(memberTransfers.map(t => t.fromId === member.id ? t.toId : t.fromId));
+                            const indirectDebtors = [...new Set(memberRawCreditsFrom.map(d => d.debtorId))]
+                              .filter(id => !directParties.has(id));
+                            if (indirectDebtors.length === 0) return null;
+                            const names = indirectDebtors.map(id => members.find(m => m.id === id)?.name ?? '?');
+                            const list = names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+                            const directNames = [...directParties].map(id => members.find(m => m.id === id)?.name ?? '?').join(' / ');
+                            return (
+                              <div style={s.settlementRoutingNote}>
+                                {list}'s share{names.length > 1 ? 's' : ''} {names.length > 1 ? 'are' : 'is'} routed through {directNames} to keep transfers minimal.
+                              </div>
+                            );
+                          })()}
+                          {memberTransfers.some(t => t.status === 'reconcile') && (
+                            <div style={s.settlementReconcileNote}>
+                              Amount changed since marked paid. Open the transfers list to square up.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </motion.div>
               )}
@@ -1180,6 +1229,7 @@ const s = {
   settlementStatusPending: { color: 'var(--text-tertiary)', fontWeight: 400 },
   settlementStatusReconcile: { color: '#9A5A1A', fontWeight: 500 },
   settlementReconcileNote: { fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '6px', lineHeight: 1.4, fontStyle: 'italic' },
+  settlementRoutingNote: { fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginTop: '8px', lineHeight: 1.4 },
   payRowRight: { display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 },
   transferMarkBtn: { backgroundColor: 'var(--text-primary)', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 500, color: 'var(--bg-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', whiteSpace: 'nowrap' },
   transferPaidBtn: { backgroundColor: '#EAF3DE', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 500, color: '#27500A', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', whiteSpace: 'nowrap' },

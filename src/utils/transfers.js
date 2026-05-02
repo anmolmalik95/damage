@@ -91,6 +91,33 @@ export function transferKey(fromId, toId) {
   return `${fromId}__${toId}`;
 }
 
+// What a member paid out-of-pocket: sum of full venue/item totals where they're
+// the bill payer. Returns total + breakdown by source for explanation UI.
+export function computeMemberPaid({ memberId, venues, sessionBillPayer, isMultiPayer }) {
+  let total = 0;
+  const sources = [];
+  for (const venue of venues) {
+    const isTransport = venue.name === 'Transport' || venue.isTransport;
+    if (isTransport) {
+      for (const item of venue.items) {
+        const itemBillPayer = item.billPayer || (isMultiPayer ? null : sessionBillPayer);
+        if (itemBillPayer !== memberId) continue;
+        const amt = (item.unitPrice ?? 0) * (item.quantity ?? 1);
+        total += amt;
+        sources.push({ label: item.name, amount: amt });
+      }
+    } else {
+      const vBillPayer = venue.billPayer || (isMultiPayer ? null : sessionBillPayer);
+      if (vBillPayer !== memberId) continue;
+      const subtotal = venue.items.reduce((s, i) => s + (i.unitPrice ?? 0) * (i.quantity ?? 1), 0);
+      const amt = subtotal + (venue.gstAmount || 0) + (venue.serviceChargeAmount || 0);
+      total += amt;
+      sources.push({ label: venue.name, amount: amt });
+    }
+  }
+  return { total, sources };
+}
+
 // Returns canonical transfer list with paid status overlaid.
 // Each row: { fromId, toId, requiredAmount, paidAmount, paid, status, paidAt }
 // status ∈ 'pending' | 'paid' | 'reconcile'
