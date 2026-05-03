@@ -281,13 +281,78 @@ export default function ClaimItems() {
   function openSharedSheet(itemId, instanceNumber, itemName, unitPrice) {
     const existing = instanceClaim(itemId, instanceNumber);
     setSharedSelected(existing?.type === 'shared' ? [...existing.sharedWith] : [currentMemberId]);
-    setSharedSheet({ itemId, instanceNumber, itemName, unitPrice, existingId: existing?.id ?? null });
+    setSharedSheet({ mode: 'instance', itemId, instanceNumber, itemName, unitPrice, existingId: existing?.id ?? null });
+    setShowNewPersonInput(false);
+    setSharedNewName('');
+  }
+
+  function openSplitAllSheet(item) {
+    setSharedSelected([currentMemberId]);
+    setSharedSheet({
+      mode: 'all',
+      itemId: item.id,
+      itemName: item.name,
+      unitPrice: item.unitPrice ?? 0,
+      quantity: item.quantity ?? 1,
+      hasExistingClaims: claimsFor(item.id).length > 0,
+    });
     setShowNewPersonInput(false);
     setSharedNewName('');
   }
 
   async function confirmShared() {
     if (!sharedSheet || sharedSelected.length === 0) return;
+
+    if (sharedSheet.mode === 'all') {
+      const { itemId, quantity } = sharedSheet;
+      const N = sharedSelected.length;
+      const wholePerPerson = Math.floor(quantity / N);
+      const remainder = quantity - wholePerPerson * N;
+
+      const existing = claimsFor(itemId);
+      const batch = writeBatch(db);
+      existing.forEach(c => {
+        batch.delete(doc(db, 'sessions', sessionId, 'claims', c.id));
+      });
+
+      const optimisticClaims = [];
+      let instanceNum = 1;
+      for (let p = 0; p < N; p++) {
+        const memberId = sharedSelected[p];
+        for (let k = 0; k < wholePerPerson; k++) {
+          const ref = doc(collection(db, 'sessions', sessionId, 'claims'));
+          const data = {
+            itemId, instanceNumber: instanceNum, memberId,
+            claimedBy: currentMemberId, claimedByName: currentMemberName,
+            type: 'whole', sharedWith: [],
+          };
+          batch.set(ref, { ...data, createdAt: serverTimestamp() });
+          optimisticClaims.push({ id: ref.id, ...data });
+          instanceNum++;
+        }
+      }
+      for (let r = 0; r < remainder; r++) {
+        const ref = doc(collection(db, 'sessions', sessionId, 'claims'));
+        const data = {
+          itemId, instanceNumber: instanceNum, memberId: sharedSelected[0],
+          claimedBy: currentMemberId, claimedByName: currentMemberName,
+          type: 'shared', sharedWith: [...sharedSelected],
+        };
+        batch.set(ref, { ...data, createdAt: serverTimestamp() });
+        optimisticClaims.push({ id: ref.id, ...data });
+        instanceNum++;
+      }
+
+      setClaims(p => [...p.filter(c => c.itemId !== itemId), ...optimisticClaims]);
+      setSharedSheet(null);
+      try { await batch.commit(); }
+      catch (err) {
+        console.error('Split all failed:', err);
+        showToast("Couldn't split row. Try again.", 'error');
+      }
+      return;
+    }
+
     const { itemId, instanceNumber, existingId } = sharedSheet;
     const batch = writeBatch(db);
     if (existingId) batch.delete(doc(db, 'sessions', sessionId, 'claims', existingId));
@@ -639,6 +704,18 @@ export default function ClaimItems() {
 
                 {isExpanded && (
                   <div style={s.expandedView}>
+                    {qty > 1 && !isDoneClaiming && (
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        style={s.splitAllRow}
+                        onClick={e => { e.stopPropagation(); openSplitAllSheet(item); }}
+                        onKeyDown={clickKey(() => openSplitAllSheet(item))}
+                      >
+                        <span style={s.splitAllLabel}>Split entire row · {qty} units evenly between people</span>
+                        <span style={s.splitAllArrow}>›</span>
+                      </div>
+                    )}
                     {Array.from({ length: qty }, (_, i) => i + 1).map(n => {
                       const claim = instanceClaim(item.id, n);
                       const claimer = claim ? members.find(m => m.id === claim.memberId) : null;
@@ -1034,8 +1111,22 @@ export default function ClaimItems() {
           <div role="dialog" aria-modal="true" aria-label="Share this item" style={s.sharedSheetPanel}>
             <div style={s.sheetHandle} />
             <div style={s.sharedSheetInner}>
-            <div style={s.sheetTitle}>{sharedSheet.itemName} · ${(sharedSheet.unitPrice ?? 0).toFixed(2)}</div>
-            <div style={s.sheetSubtitle}>Who shared this? Select everyone who was in on it.</div>
+            {sharedSheet.mode === 'all' ? (
+              <>
+                <div style={s.sheetTitle}>
+                  Split {sharedSheet.quantity} × {sharedSheet.itemName} · ${((sharedSheet.unitPrice ?? 0) * sharedSheet.quantity).toFixed(2)}
+                </div>
+                <div style={s.sheetSubtitle}>
+                  Distribute the whole row evenly between selected people.
+                  {sharedSheet.hasExistingClaims ? ' This will replace existing claims for this item.' : ''}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={s.sheetTitle}>{sharedSheet.itemName} · ${(sharedSheet.unitPrice ?? 0).toFixed(2)}</div>
+                <div style={s.sheetSubtitle}>Who shared this? Select everyone who was in on it.</div>
+              </>
+            )}
 
             <div style={s.sharedGridWrap}><div style={s.sharedGrid}>
               {members.map((member, idx) => {
@@ -1095,12 +1186,18 @@ export default function ClaimItems() {
               {members.every(m => sharedSelected.includes(m.id)) ? 'Deselect all' : 'Split between all'}
             </button>
 
-            {sharedSelected.length > 0 && (
-              <div style={s.splitSummary}>
-                <span style={s.splitSummaryText}>Split evenly between {sharedSelected.length} {sharedSelected.length === 1 ? 'person' : 'people'} · </span>
-                <span style={s.splitSummaryAmt}>${((sharedSheet.unitPrice ?? 0) / sharedSelected.length).toFixed(2)} each</span>
-              </div>
-            )}
+            {sharedSelected.length > 0 && (() => {
+              const total = sharedSheet.mode === 'all'
+                ? (sharedSheet.unitPrice ?? 0) * sharedSheet.quantity
+                : (sharedSheet.unitPrice ?? 0);
+              const each = total / sharedSelected.length;
+              return (
+                <div style={s.splitSummary}>
+                  <span style={s.splitSummaryText}>Split evenly between {sharedSelected.length} {sharedSelected.length === 1 ? 'person' : 'people'} · </span>
+                  <span style={s.splitSummaryAmt}>${each.toFixed(2)} each</span>
+                </div>
+              );
+            })()}
 
             <div style={s.sheetBtns}>
               <button style={s.sheetCancelBtn} onClick={() => setSharedSheet(null)}>Cancel</button>
@@ -1266,6 +1363,21 @@ const s = {
     fontSize: '11px', fontWeight: 500, padding: '3px 8px',
     borderRadius: '20px', backgroundColor: '#f0eeff', color: '#534AB7',
     fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer',
+  },
+  splitAllRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '10px 12px 10px 20px',
+    borderBottom: '0.5px solid var(--border-color)',
+    backgroundColor: '#f0eeff',
+    cursor: 'pointer',
+  },
+  splitAllLabel: {
+    fontSize: '12px', fontWeight: 500, color: '#534AB7',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+  },
+  splitAllArrow: {
+    fontSize: '14px', color: '#534AB7',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
   },
   unitActions: { display: 'flex', gap: '8px', alignItems: 'center' },
   unitClaimBtn: {
