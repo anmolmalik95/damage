@@ -287,17 +287,44 @@ export default function ClaimItems() {
   }
 
   function openSplitAllSheet(item) {
-    setSharedSelected([currentMemberId]);
+    const existing = claimsFor(item.id);
+    const attributedIds = new Set();
+    existing.forEach(c => {
+      if (c.type === 'whole') attributedIds.add(c.memberId);
+      else if (c.type === 'shared') c.sharedWith?.forEach(mid => attributedIds.add(mid));
+    });
+    const prefill = attributedIds.size > 0 ? [...attributedIds] : [currentMemberId];
+    setSharedSelected(prefill);
     setSharedSheet({
       mode: 'all',
       itemId: item.id,
       itemName: item.name,
       unitPrice: item.unitPrice ?? 0,
       quantity: item.quantity ?? 1,
-      hasExistingClaims: claimsFor(item.id).length > 0,
+      hasExistingClaims: existing.length > 0,
     });
     setShowNewPersonInput(false);
     setSharedNewName('');
+  }
+
+  async function unclaimItemRow() {
+    if (!sharedSheet) return;
+    const { itemId, itemName } = sharedSheet;
+    const existing = claimsFor(itemId);
+    if (existing.length === 0) { setSharedSheet(null); return; }
+    const batch = writeBatch(db);
+    existing.forEach(c => {
+      batch.delete(doc(db, 'sessions', sessionId, 'claims', c.id));
+    });
+    setClaims(p => p.filter(c => c.itemId !== itemId));
+    setSharedSheet(null);
+    try {
+      await batch.commit();
+      showToast(`Unclaimed ${itemName}`, 'success');
+    } catch (err) {
+      console.error('Unclaim row failed:', err);
+      showToast("Couldn't unclaim. Try again.", 'error');
+    }
   }
 
   async function confirmShared() {
@@ -655,18 +682,21 @@ export default function ClaimItems() {
             const qty = item.quantity ?? 1;
             const allClaimed = totalClaimed >= qty;
             const myCnt = myCount(item.id);
-            const isExpanded = expandedItems.has(item.id);
+            const canExpand = qty > 1;
+            const isExpanded = canExpand && expandedItems.has(item.id);
             const attribution = claimAttribution(item.id);
 
             return (
               <div key={item.id} data-row="true">
                 <div
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={isExpanded}
-                  style={{ ...s.itemRow, cursor: 'pointer' }}
-                  onClick={() => toggleItem(item.id)}
-                  onKeyDown={clickKey(() => toggleItem(item.id))}
+                  {...(canExpand ? {
+                    role: 'button',
+                    tabIndex: 0,
+                    'aria-expanded': isExpanded,
+                    onClick: () => toggleItem(item.id),
+                    onKeyDown: clickKey(() => toggleItem(item.id)),
+                  } : {})}
+                  style={{ ...s.itemRow, cursor: canExpand ? 'pointer' : 'default' }}
                 >
                   <div style={s.itemLeft}>
                     <div style={s.itemNameRow}>
@@ -702,9 +732,11 @@ export default function ClaimItems() {
                       style={{ ...s.ctrlBtn, opacity: (allClaimed || isDoneClaiming) ? 0.25 : 1 }}
                       onClick={e => { e.stopPropagation(); !isDoneClaiming && !allClaimed && handleClaim(item); }}
                     >+</span>
-                    <span style={s.chevron}>
-                      {isExpanded ? '⌄' : '›'}
-                    </span>
+                    {canExpand && (
+                      <span style={s.chevron}>
+                        {isExpanded ? '⌄' : '›'}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1193,6 +1225,12 @@ export default function ClaimItems() {
               );
             })()}
 
+            {sharedSheet.mode === 'all' && sharedSheet.hasExistingClaims && (
+              <button style={s.unclaimRowBtn} onClick={unclaimItemRow}>
+                Mark unclaimed
+              </button>
+            )}
+
             <div style={s.sheetBtns}>
               <button style={s.sheetCancelBtn} onClick={() => setSharedSheet(null)}>Cancel</button>
               <button style={s.sheetConfirmBtn} onClick={confirmShared}>Confirm</button>
@@ -1561,6 +1599,15 @@ const s = {
     fontSize: '11px', color: 'var(--text-tertiary)',
     fontFamily: 'system-ui, -apple-system, sans-serif',
     textAlign: 'right', marginBottom: '16px',
+  },
+  unclaimRowBtn: {
+    display: 'block', width: '100%',
+    background: 'none', border: 'none',
+    padding: '10px 0', marginBottom: '4px',
+    fontSize: '12px', fontWeight: 500, color: '#e24b4a',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    cursor: 'pointer', textAlign: 'center',
+    textDecoration: 'underline',
   },
   sheetBtns: { display: 'flex', gap: '10px' },
   sheetCancelBtn: {
