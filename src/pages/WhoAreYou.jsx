@@ -82,9 +82,9 @@ export default function WhoAreYou() {
       });
       const newMember = { id: ref.id, name, isCreator: false };
       setMembers(prev => [...prev, newMember]);
-      setSelectedId(ref.id);
       setShowNewInput(false);
       setNewName('');
+      chooseMember(newMember);
     } catch (err) {
       console.error(err);
     } finally {
@@ -92,9 +92,10 @@ export default function WhoAreYou() {
     }
   }
 
-  async function handleContinue() {
-    const member = members.find(m => m.id === selectedId);
-    if (!member) return;
+  async function chooseMember(member) {
+    if (!member || continuing) return;
+    setSelectedId(member.id);
+    setContinuing(true);
     localStorage.setItem(`member_${sessionId}`, member.id);
     localStorage.setItem(`memberName_${sessionId}`, member.name);
 
@@ -103,7 +104,6 @@ export default function WhoAreYou() {
       return;
     }
 
-    setContinuing(true);
     try {
       const claimsSnap = await getDocs(collection(db, 'sessions', sessionId, 'claims'));
       const hasClaimsForUser = claimsSnap.docs.some(d => {
@@ -173,15 +173,17 @@ export default function WhoAreYou() {
                 ...styles.memberRow,
                 backgroundColor: isSelected ? 'var(--bg-secondary)' : 'transparent',
                 borderLeft: isSelected ? '3px solid var(--text-primary)' : '3px solid transparent',
+                opacity: continuing && !isSelected ? 0.4 : 1,
+                pointerEvents: continuing ? 'none' : 'auto',
               }}
-              onClick={() => { setSelectedId(member.id); setShowNewInput(false); }}
+              onClick={() => { setShowNewInput(false); chooseMember(member); }}
             >
               <div style={{ ...styles.avatar, backgroundColor: AVATAR_COLORS[idx % AVATAR_COLORS.length] }}>
                 {member.name.charAt(0).toUpperCase()}
               </div>
               <div>
                 <div style={styles.memberName}>{member.name}</div>
-                {isSelected && <div style={styles.selectedLabel}>Selected</div>}
+                {isSelected && continuing && <div style={styles.selectedLabel}>Loading…</div>}
               </div>
             </div>
           );
@@ -212,15 +214,6 @@ export default function WhoAreYou() {
         ) : null}
       </div>
 
-      {selectedId && (
-        <button
-          style={{ ...styles.continueBtn, opacity: continuing ? 0.6 : 1 }}
-          onClick={handleContinue}
-          disabled={continuing}
-        >
-          {continuing ? 'Loading…' : `Continue as ${members.find(m => m.id === selectedId)?.name}`}
-        </button>
-      )}
     </PageContainer>
   );
 }

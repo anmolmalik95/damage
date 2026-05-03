@@ -11,6 +11,7 @@ import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import { BRAND_NAME } from '../brand';
 import { clickKey } from '../utils/a11y';
+import { useIsDesktop } from '../hooks/useIsDesktop';
 
 const AVATAR_COLORS = ['#5b9bd5', '#3dba8a', '#e8a03a', '#e07060', '#9070d0', '#4db8b8'];
 
@@ -51,6 +52,7 @@ export default function ClaimItems() {
 
   const currentMemberId = localStorage.getItem(`member_${sessionId}`);
   const currentMemberName = localStorage.getItem(`memberName_${sessionId}`);
+  const isDesktop = useIsDesktop();
 
   const [session, setSession] = useState(null);
   const [venues, setVenues] = useState([]);
@@ -686,6 +688,40 @@ export default function ClaimItems() {
             const isExpanded = canExpand && expandedItems.has(item.id);
             const attribution = claimAttribution(item.id);
 
+            const claimTagStyle = {
+              ...s.claimTag,
+              ...(totalClaimed === 0
+                ? { backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)' }
+                : allClaimed
+                ? { backgroundColor: '#EAF3DE', color: '#27500A' }
+                : { backgroundColor: '#EEEDFE', color: '#3C3489' }),
+            };
+            const controlsCluster = (
+              <div style={s.itemControls}>
+                {!isDoneClaiming && (
+                  <span
+                    style={s.rowSplitBtn}
+                    onClick={e => { e.stopPropagation(); openSplitAllSheet(item); }}
+                  >Split</span>
+                )}
+                <span
+                  style={{ ...s.ctrlBtn, opacity: (myCnt === 0 || isDoneClaiming) ? 0.25 : 1 }}
+                  onClick={e => { e.stopPropagation(); !isDoneClaiming && myCnt > 0 && handleUnclaim(item); }}
+                >−</span>
+                <span style={s.ctrlCount}>{myCnt}</span>
+                <span
+                  style={{ ...s.ctrlBtn, opacity: (allClaimed || isDoneClaiming) ? 0.25 : 1 }}
+                  onClick={e => { e.stopPropagation(); !isDoneClaiming && !allClaimed && handleClaim(item); }}
+                >+</span>
+                {canExpand && (
+                  <span style={s.chevron}>
+                    {isExpanded ? '⌄' : '›'}
+                  </span>
+                )}
+              </div>
+            );
+            const attributionLine = `$${(item.unitPrice ?? 0).toFixed(2)}${attribution ? ` · ${attribution}` : ''}`;
+
             return (
               <div key={item.id} data-row="true">
                 <div
@@ -696,48 +732,34 @@ export default function ClaimItems() {
                     onClick: () => toggleItem(item.id),
                     onKeyDown: clickKey(() => toggleItem(item.id)),
                   } : {})}
-                  style={{ ...s.itemRow, cursor: canExpand ? 'pointer' : 'default' }}
+                  style={{
+                    ...(isDesktop ? s.itemRow : s.itemRowStacked),
+                    cursor: canExpand ? 'pointer' : 'default',
+                  }}
                 >
-                  <div style={s.itemLeft}>
-                    <div style={s.itemNameRow}>
-                      <span style={s.itemName}>{item.name}</span>
-                      <span style={{
-                        ...s.claimTag,
-                        ...(totalClaimed === 0
-                          ? { backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '0.5px solid var(--border-color)' }
-                          : allClaimed
-                          ? { backgroundColor: '#EAF3DE', color: '#27500A' }
-                          : { backgroundColor: '#EEEDFE', color: '#3C3489' }),
-                      }}>
-                        {totalClaimed}/{qty}
-                      </span>
-                    </div>
-                    <div style={s.itemAttribution}>
-                      ${(item.unitPrice ?? 0).toFixed(2)}{attribution ? ` · ${attribution}` : ''}
-                    </div>
-                  </div>
-                  <div style={s.itemControls}>
-                    {!isDoneClaiming && (
-                      <span
-                        style={s.rowSplitBtn}
-                        onClick={e => { e.stopPropagation(); openSplitAllSheet(item); }}
-                      >Split</span>
-                    )}
-                    <span
-                      style={{ ...s.ctrlBtn, opacity: (myCnt === 0 || isDoneClaiming) ? 0.25 : 1 }}
-                      onClick={e => { e.stopPropagation(); !isDoneClaiming && myCnt > 0 && handleUnclaim(item); }}
-                    >−</span>
-                    <span style={s.ctrlCount}>{myCnt}</span>
-                    <span
-                      style={{ ...s.ctrlBtn, opacity: (allClaimed || isDoneClaiming) ? 0.25 : 1 }}
-                      onClick={e => { e.stopPropagation(); !isDoneClaiming && !allClaimed && handleClaim(item); }}
-                    >+</span>
-                    {canExpand && (
-                      <span style={s.chevron}>
-                        {isExpanded ? '⌄' : '›'}
-                      </span>
-                    )}
-                  </div>
+                  {isDesktop ? (
+                    <>
+                      <div style={s.itemLeft}>
+                        <div style={s.itemNameRow}>
+                          <span style={s.itemName}>{item.name}</span>
+                          <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
+                        </div>
+                        <div style={s.itemAttribution}>{attributionLine}</div>
+                      </div>
+                      {controlsCluster}
+                    </>
+                  ) : (
+                    <>
+                      <div style={s.itemTopRow}>
+                        <span style={s.itemName}>{item.name}</span>
+                        <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
+                      </div>
+                      <div style={s.itemBottomRow}>
+                        <div style={s.itemAttributionStacked}>{attributionLine}</div>
+                        {controlsCluster}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {isExpanded && (
@@ -1342,12 +1364,31 @@ const s = {
     padding: '11px 12px 11px 16px', borderBottom: '0.5px solid var(--border-color)',
     backgroundColor: 'var(--bg-primary)',
   },
+  itemRowStacked: {
+    display: 'flex', flexDirection: 'column', gap: '6px',
+    padding: '10px 12px 10px 14px', borderBottom: '0.5px solid var(--border-color)',
+    backgroundColor: 'var(--bg-primary)',
+  },
+  itemTopRow: {
+    display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0,
+  },
+  itemBottomRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: '8px', minWidth: 0,
+  },
+  itemAttributionStacked: {
+    fontSize: '11px', color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    flex: 1, minWidth: 0,
+  },
   itemLeft: { display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '2px', flex: 1, minWidth: 0 },
   itemNameRow: { display: 'flex', alignItems: 'center', gap: '8px' },
   itemName: {
     fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)',
     fontFamily: 'system-ui, -apple-system, sans-serif',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    flex: 1, minWidth: 0,
   },
   itemAttribution: {
     fontSize: '11px', color: 'var(--text-secondary)',
