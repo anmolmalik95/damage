@@ -622,7 +622,7 @@ export default function ClaimItems() {
           )}
         </div>
         <div style={s.progressHint}>
-          Tap + to claim · tap › to expand and split individual units
+          Tap + to claim · Split to share the whole row · › to split individual units
         </div>
       </div>
 
@@ -687,6 +687,12 @@ export default function ClaimItems() {
                     </div>
                   </div>
                   <div style={s.itemControls}>
+                    {!isDoneClaiming && (
+                      <span
+                        style={s.rowSplitBtn}
+                        onClick={e => { e.stopPropagation(); openSplitAllSheet(item); }}
+                      >Split</span>
+                    )}
                     <span
                       style={{ ...s.ctrlBtn, opacity: (myCnt === 0 || isDoneClaiming) ? 0.25 : 1 }}
                       onClick={e => { e.stopPropagation(); !isDoneClaiming && myCnt > 0 && handleUnclaim(item); }}
@@ -704,18 +710,6 @@ export default function ClaimItems() {
 
                 {isExpanded && (
                   <div style={s.expandedView}>
-                    {qty > 1 && !isDoneClaiming && (
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        style={s.splitAllRow}
-                        onClick={e => { e.stopPropagation(); openSplitAllSheet(item); }}
-                        onKeyDown={clickKey(() => openSplitAllSheet(item))}
-                      >
-                        <span style={s.splitAllLabel}>Split entire row · {qty} units evenly between people</span>
-                        <span style={s.splitAllArrow}>›</span>
-                      </div>
-                    )}
                     {Array.from({ length: qty }, (_, i) => i + 1).map(n => {
                       const claim = instanceClaim(item.id, n);
                       const claimer = claim ? members.find(m => m.id === claim.memberId) : null;
@@ -1328,7 +1322,13 @@ const s = {
     borderRadius: '20px', flexShrink: 0,
     fontFamily: 'system-ui, -apple-system, sans-serif',
   },
-  itemControls: { display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 },
+  itemControls: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
+  rowSplitBtn: {
+    fontSize: '11px', fontWeight: 500, color: '#534AB7', cursor: 'pointer',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    padding: '3px 9px', borderRadius: '20px', backgroundColor: '#f0eeff',
+    userSelect: 'none', lineHeight: 1.4,
+  },
   ctrlBtn: {
     fontSize: '20px', color: 'var(--text-primary)', cursor: 'pointer',
     fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -1363,21 +1363,6 @@ const s = {
     fontSize: '11px', fontWeight: 500, padding: '3px 8px',
     borderRadius: '20px', backgroundColor: '#f0eeff', color: '#534AB7',
     fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer',
-  },
-  splitAllRow: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '10px 12px 10px 20px',
-    borderBottom: '0.5px solid var(--border-color)',
-    backgroundColor: '#f0eeff',
-    cursor: 'pointer',
-  },
-  splitAllLabel: {
-    fontSize: '12px', fontWeight: 500, color: '#534AB7',
-    fontFamily: 'system-ui, -apple-system, sans-serif',
-  },
-  splitAllArrow: {
-    fontSize: '14px', color: '#534AB7',
-    fontFamily: 'system-ui, -apple-system, sans-serif',
   },
   unitActions: { display: 'flex', gap: '8px', alignItems: 'center' },
   unitClaimBtn: {
