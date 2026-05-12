@@ -697,14 +697,14 @@ export default function ClaimItems() {
                 ? { backgroundColor: '#EAF3DE', color: '#27500A' }
                 : { backgroundColor: '#EEEDFE', color: '#3C3489' }),
             };
-            const controlsCluster = (
+            const splitPill = !isDoneClaiming && (
+              <span
+                style={s.rowSplitBtn}
+                onClick={e => { e.stopPropagation(); openSplitAllSheet(item); }}
+              >Split</span>
+            );
+            const qtyControls = (
               <div style={s.itemControls}>
-                {!isDoneClaiming && (
-                  <span
-                    style={s.rowSplitBtn}
-                    onClick={e => { e.stopPropagation(); openSplitAllSheet(item); }}
-                  >Split</span>
-                )}
                 <span
                   style={{ ...s.ctrlBtn, opacity: (myCnt === 0 || isDoneClaiming) ? 0.25 : 1 }}
                   onClick={e => { e.stopPropagation(); !isDoneClaiming && myCnt > 0 && handleUnclaim(item); }}
@@ -714,10 +714,12 @@ export default function ClaimItems() {
                   style={{ ...s.ctrlBtn, opacity: (allClaimed || isDoneClaiming) ? 0.25 : 1 }}
                   onClick={e => { e.stopPropagation(); !isDoneClaiming && !allClaimed && handleClaim(item); }}
                 >+</span>
-                <span style={{ ...s.chevron, visibility: canExpand ? 'visible' : 'hidden' }} aria-hidden={!canExpand}>
-                  {isExpanded ? '⌄' : '›'}
-                </span>
               </div>
+            );
+            const desktopChevron = (
+              <span style={{ ...s.chevron, visibility: canExpand ? 'visible' : 'hidden' }} aria-hidden={!canExpand}>
+                {isExpanded ? '⌄' : '›'}
+              </span>
             );
             const attributionLine = `$${(item.unitPrice ?? 0).toFixed(2)}${attribution ? ` · ${attribution}` : ''}`;
 
@@ -743,17 +745,25 @@ export default function ClaimItems() {
                         <div style={s.itemAttribution}>{attributionLine}</div>
                       </div>
                       <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
-                      {controlsCluster}
+                      {splitPill}
+                      {qtyControls}
+                      {desktopChevron}
                     </>
                   ) : (
                     <>
                       <div style={s.itemTopRow}>
                         <span style={s.itemName}>{item.name}</span>
+                        {canExpand && (
+                          <span style={s.chevronTop} aria-hidden="false">
+                            {isExpanded ? '⌄' : '›'}
+                          </span>
+                        )}
                       </div>
                       <div style={s.itemBottomRow}>
                         <div style={s.itemAttributionStacked}>{attributionLine}</div>
                         <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
-                        {controlsCluster}
+                        {splitPill}
+                        {qtyControls}
                       </div>
                     </>
                   )}
@@ -1360,6 +1370,7 @@ const s = {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '11px 12px 11px 16px', borderBottom: '0.5px solid var(--border-color)',
     backgroundColor: 'var(--bg-primary)',
+    gap: '8px',
   },
   itemRowStacked: {
     display: 'flex', flexDirection: 'column', gap: '6px',
@@ -1402,8 +1413,8 @@ const s = {
   rowSplitBtn: {
     fontSize: '11px', fontWeight: 500, color: '#534AB7', cursor: 'pointer',
     fontFamily: 'system-ui, -apple-system, sans-serif',
-    padding: '3px 9px', borderRadius: '20px', backgroundColor: '#f0eeff',
-    userSelect: 'none', lineHeight: 1.4,
+    padding: '2px 8px', borderRadius: '20px', backgroundColor: '#f0eeff',
+    userSelect: 'none', lineHeight: 1.4, flexShrink: 0,
   },
   ctrlBtn: {
     fontSize: '20px', color: 'var(--text-primary)', cursor: 'pointer',
@@ -1417,7 +1428,11 @@ const s = {
   },
   chevron: {
     fontSize: '16px', color: 'var(--text-secondary)', cursor: 'pointer',
-    fontFamily: 'system-ui, -apple-system, sans-serif', paddingLeft: '4px',
+    fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0,
+  },
+  chevronTop: {
+    fontSize: '16px', color: 'var(--text-secondary)', cursor: 'pointer',
+    fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1, flexShrink: 0,
   },
   expandedView: {
     backgroundColor: 'var(--bg-secondary)',
