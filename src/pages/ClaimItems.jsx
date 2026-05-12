@@ -739,12 +739,10 @@ export default function ClaimItems() {
                   {isDesktop ? (
                     <>
                       <div style={s.itemLeft}>
-                        <div style={s.itemNameRow}>
-                          <span style={s.itemName}>{item.name}</span>
-                          <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
-                        </div>
+                        <span style={s.itemName}>{item.name}</span>
                         <div style={s.itemAttribution}>{attributionLine}</div>
                       </div>
+                      <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
                       {controlsCluster}
                     </>
                   ) : (
