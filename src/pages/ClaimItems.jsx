@@ -1433,6 +1433,7 @@ const s = {
   chevronTop: {
     fontSize: '16px', color: 'var(--text-secondary)', cursor: 'pointer',
     fontFamily: 'system-ui, -apple-system, sans-serif', lineHeight: 1, flexShrink: 0,
+    minWidth: '18px', textAlign: 'center', padding: '2px 0', display: 'inline-block',
   },
   expandedView: {
     backgroundColor: 'var(--bg-secondary)',
