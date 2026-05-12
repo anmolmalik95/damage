@@ -751,10 +751,10 @@ export default function ClaimItems() {
                     <>
                       <div style={s.itemTopRow}>
                         <span style={s.itemName}>{item.name}</span>
-                        <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
                       </div>
                       <div style={s.itemBottomRow}>
                         <div style={s.itemAttributionStacked}>{attributionLine}</div>
+                        <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
                         {controlsCluster}
                       </div>
                     </>
