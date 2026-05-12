@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, Fragment } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { doc, getDoc, getDocs, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { DndContext, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
+import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import PhotoThumbnail from '../components/PhotoThumbnail';
@@ -69,6 +72,8 @@ export default function ConfirmItems() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [editingKey, setEditingKey] = useState(null);
+  const [taxEditingKey, setTaxEditingKey] = useState(null); // `${vi}_gst` | `${vi}_sc` | null
+  const [sheetTaxEditingKey, setSheetTaxEditingKey] = useState(null); // 'gst' | 'sc' | null
 
   // Add venue sheet state
   const [addVenueOpen, setAddVenueOpen] = useState(false);
@@ -92,6 +97,12 @@ export default function ConfirmItems() {
   const prevSheetEditingKeyRef = useRef(null);
   const newVenueItemsRef = useRef([]);
   const sheetPhotoRef = useRef(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   // Keep venuesRef current so the editingKey effect can read live state without a stale closure.
   useEffect(() => { venuesRef.current = venues; }, [venues]);
@@ -177,12 +188,15 @@ export default function ConfirmItems() {
               serviceCharge: d.serviceChargePercent != null ? { percent: d.serviceChargePercent, amount: d.serviceChargeAmount ?? null } : null,
               receiptTotal: d.receiptTotal ?? 0,
               userReceiptTotal: String(d.receiptTotal ?? ''),
-              items: iSnap.docs.map((iDoc, iIdx) => ({
-                id: iIdx,
-                name: iDoc.data().name,
-                quantity: iDoc.data().quantity ?? 1,
-                unitPrice: iDoc.data().unitPrice ?? 0,
-              })),
+              items: iSnap.docs
+                .slice()
+                .sort((a, b) => (a.data().order ?? 9999) - (b.data().order ?? 9999))
+                .map((iDoc, iIdx) => ({
+                  id: iIdx,
+                  name: iDoc.data().name,
+                  quantity: iDoc.data().quantity ?? 1,
+                  unitPrice: iDoc.data().unitPrice ?? 0,
+                })),
             };
           })
         );
@@ -233,6 +247,29 @@ export default function ConfirmItems() {
     setEditingKey(`${vi}_${newId}`);
   }
 
+  function handleVenueDragEnd(vi, event) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setVenues(prev => prev.map((v, i) => {
+      if (i !== vi) return v;
+      const oldIdx = v.items.findIndex(it => it.id === active.id);
+      const newIdx = v.items.findIndex(it => it.id === over.id);
+      if (oldIdx < 0 || newIdx < 0) return v;
+      return { ...v, items: arrayMove(v.items, oldIdx, newIdx) };
+    }));
+  }
+
+  function handleSheetDragEnd(event) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setNewVenueItems(prev => {
+      const oldIdx = prev.findIndex(it => it.id === active.id);
+      const newIdx = prev.findIndex(it => it.id === over.id);
+      if (oldIdx < 0 || newIdx < 0) return prev;
+      return arrayMove(prev, oldIdx, newIdx);
+    });
+  }
+
   function toggleEdit(vi, itemId) {
     const key = `${vi}_${itemId}`;
     setEditingKey(prev => prev === key ? null : key);
@@ -246,6 +283,51 @@ export default function ConfirmItems() {
     setVenues(prev => prev.map((v, i) =>
       i !== vi ? v : { ...v, userReceiptTotal: value }
     ));
+  }
+
+  function updateVenueTaxField(vi, taxKey, field, value) {
+    const key = taxKey === 'gst' ? 'gst' : 'serviceCharge';
+    const parsed = value === '' ? null : Number(value);
+    setVenues(prev => prev.map((v, i) => {
+      if (i !== vi) return v;
+      const existing = v[key] ?? { present: true, percent: null, amount: null };
+      return { ...v, [key]: { ...existing, present: true, [field]: parsed } };
+    }));
+  }
+
+  function addVenueTax(vi, taxKey) {
+    const key = taxKey === 'gst' ? 'gst' : 'serviceCharge';
+    setVenues(prev => prev.map((v, i) =>
+      i !== vi ? v : { ...v, [key]: { present: true, percent: null, amount: 0 } }
+    ));
+    setTaxEditingKey(`${vi}_${taxKey}`);
+  }
+
+  function removeVenueTax(vi, taxKey) {
+    const key = taxKey === 'gst' ? 'gst' : 'serviceCharge';
+    setVenues(prev => prev.map((v, i) =>
+      i !== vi ? v : { ...v, [key]: null }
+    ));
+    setTaxEditingKey(null);
+  }
+
+  function updateSheetTaxField(taxKey, field, value) {
+    const setter = taxKey === 'gst' ? setNewVenueGst : setNewVenueSc;
+    const current = taxKey === 'gst' ? newVenueGst : newVenueSc;
+    const parsed = value === '' ? null : Number(value);
+    setter({ ...(current ?? { present: true, percent: null, amount: null }), present: true, [field]: parsed });
+  }
+
+  function addSheetTax(taxKey) {
+    const setter = taxKey === 'gst' ? setNewVenueGst : setNewVenueSc;
+    setter({ present: true, percent: null, amount: 0 });
+    setSheetTaxEditingKey(taxKey);
+  }
+
+  function removeSheetTax(taxKey) {
+    const setter = taxKey === 'gst' ? setNewVenueGst : setNewVenueSc;
+    setter(null);
+    setSheetTaxEditingKey(null);
   }
 
   function resetAddVenueSheet() {
@@ -482,22 +564,53 @@ export default function ConfirmItems() {
                   <span style={styles.venueEditHint}>Tap any item to edit</span>
                 </div>
 
-                {venue.items.map(item => (
-                  <ItemRow
-                    key={item.id}
-                    item={item}
-                    isEditing={editingKey === `${vi}_${item.id}`}
-                    onToggleEdit={() => toggleEdit(vi, item.id)}
-                    onClose={() => setEditingKey(null)}
-                    onUpdate={(field, val) => updateItem(vi, item.id, field, val)}
-                    onEditChange={handleEditChange}
-                    onDelete={() => { deleteItem(vi, item.id); setEditingKey(null); }}
-                  />
-                ))}
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={e => handleVenueDragEnd(vi, e)}>
+                  <SortableContext items={venue.items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                    {venue.items.map(item => (
+                      <ItemRow
+                        key={item.id}
+                        item={item}
+                        isEditing={editingKey === `${vi}_${item.id}`}
+                        onToggleEdit={() => toggleEdit(vi, item.id)}
+                        onClose={() => setEditingKey(null)}
+                        onUpdate={(field, val) => updateItem(vi, item.id, field, val)}
+                        onEditChange={handleEditChange}
+                        onDelete={() => { deleteItem(vi, item.id); setEditingKey(null); }}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
 
                 <button style={styles.addItemLink} onClick={() => addItem(vi)}>
                   + Add item to {venue.name}
                 </button>
+
+                {!(venue.name === 'Transport' || venue.isTransport) && (
+                  <>
+                    <TaxRow
+                      label="GST"
+                      addLabel="+ Add GST"
+                      tax={venue.gst}
+                      computedAmount={venueGstAmount(venue)}
+                      isEditing={taxEditingKey === `${vi}_gst`}
+                      onStartEdit={() => venue.gst == null ? addVenueTax(vi, 'gst') : setTaxEditingKey(`${vi}_gst`)}
+                      onChange={(field, val) => updateVenueTaxField(vi, 'gst', field, val)}
+                      onRemove={() => removeVenueTax(vi, 'gst')}
+                      onDone={() => setTaxEditingKey(null)}
+                    />
+                    <TaxRow
+                      label="Service charge"
+                      addLabel="+ Add service charge"
+                      tax={venue.serviceCharge}
+                      computedAmount={venueScAmount(venue)}
+                      isEditing={taxEditingKey === `${vi}_sc`}
+                      onStartEdit={() => venue.serviceCharge == null ? addVenueTax(vi, 'sc') : setTaxEditingKey(`${vi}_sc`)}
+                      onChange={(field, val) => updateVenueTaxField(vi, 'sc', field, val)}
+                      onRemove={() => removeVenueTax(vi, 'sc')}
+                      onDone={() => setTaxEditingKey(null)}
+                    />
+                  </>
+                )}
 
                 <div style={styles.venueTotals}>
                   <TotalRow label="Subtotal" value={venueSubtotal(venue)} />
@@ -699,17 +812,21 @@ export default function ConfirmItems() {
                     <span style={styles.venueEditHint}>Tap any item to edit</span>
                   </div>
 
-                  {newVenueItems.map(item => (
-                    <ItemRow
-                      key={item.id}
-                      item={item}
-                      isEditing={sheetEditingKey === String(item.id)}
-                      onToggleEdit={() => setSheetEditingKey(p => p === String(item.id) ? null : String(item.id))}
-                      onUpdate={(field, val) => setNewVenueItems(p => p.map(i => i.id === item.id ? { ...i, [field]: val } : i))}
-                      onEditChange={(f, v) => { sheetEditValuesRef.current = { ...sheetEditValuesRef.current, [f]: v }; }}
-                      onDelete={() => { setNewVenueItems(p => p.filter(i => i.id !== item.id)); setSheetEditingKey(null); }}
-                    />
-                  ))}
+                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSheetDragEnd}>
+                    <SortableContext items={newVenueItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                      {newVenueItems.map(item => (
+                        <ItemRow
+                          key={item.id}
+                          item={item}
+                          isEditing={sheetEditingKey === String(item.id)}
+                          onToggleEdit={() => setSheetEditingKey(p => p === String(item.id) ? null : String(item.id))}
+                          onUpdate={(field, val) => setNewVenueItems(p => p.map(i => i.id === item.id ? { ...i, [field]: val } : i))}
+                          onEditChange={(f, v) => { sheetEditValuesRef.current = { ...sheetEditValuesRef.current, [f]: v }; }}
+                          onDelete={() => { setNewVenueItems(p => p.filter(i => i.id !== item.id)); setSheetEditingKey(null); }}
+                        />
+                      ))}
+                    </SortableContext>
+                  </DndContext>
 
                   <button style={styles.addItemLink} onClick={() => {
                     const newId = Date.now();
@@ -718,6 +835,29 @@ export default function ConfirmItems() {
                   }}>
                     + Add item to {newVenueName}
                   </button>
+
+                  <TaxRow
+                    label="GST"
+                    addLabel="+ Add GST"
+                    tax={newVenueGst}
+                    computedAmount={sheetGstAmount()}
+                    isEditing={sheetTaxEditingKey === 'gst'}
+                    onStartEdit={() => newVenueGst == null ? addSheetTax('gst') : setSheetTaxEditingKey('gst')}
+                    onChange={(field, val) => updateSheetTaxField('gst', field, val)}
+                    onRemove={() => removeSheetTax('gst')}
+                    onDone={() => setSheetTaxEditingKey(null)}
+                  />
+                  <TaxRow
+                    label="Service charge"
+                    addLabel="+ Add service charge"
+                    tax={newVenueSc}
+                    computedAmount={sheetScAmount()}
+                    isEditing={sheetTaxEditingKey === 'sc'}
+                    onStartEdit={() => newVenueSc == null ? addSheetTax('sc') : setSheetTaxEditingKey('sc')}
+                    onChange={(field, val) => updateSheetTaxField('sc', field, val)}
+                    onRemove={() => removeSheetTax('sc')}
+                    onDone={() => setSheetTaxEditingKey(null)}
+                  />
 
                   <div style={styles.venueTotals}>
                     <TotalRow label="Subtotal" value={sheetSubtotal()} />
@@ -790,8 +930,9 @@ export default function ConfirmItems() {
   );
 }
 
-function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChange, onDelete }) {
-  const rowRef = useRef(null);
+function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChange, onDelete, sortable = true }) {
+  const sortableHook = useSortable({ id: item.id, disabled: !sortable || isEditing });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortableHook;
   const [priceStr, setPriceStr] = useState(() => Number(item.unitPrice).toFixed(2));
   const [priceFocused, setPriceFocused] = useState(false);
 
@@ -821,9 +962,26 @@ function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChang
     };
   }, [isEditing, onClose]);
 
+  const dragStyle = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : 'auto',
+    position: 'relative',
+  };
+
   if (!isEditing) {
     return (
-      <div ref={rowRef} data-row="true" style={{ ...styles.itemRow, cursor: 'pointer' }} onClick={onToggleEdit}>
+      <div ref={setNodeRef} data-row="true" style={{ ...styles.itemRow, cursor: 'pointer', ...dragStyle }} onClick={onToggleEdit}>
+        {sortable && (
+          <button
+            {...attributes}
+            {...listeners}
+            style={styles.dragHandle}
+            aria-label="Drag to reorder"
+            onClick={e => e.stopPropagation()}
+          >⋮⋮</button>
+        )}
         <div style={{ flex: 1 }}>
           <div style={styles.itemName}>{item.name || 'Unnamed item'}</div>
           <div style={styles.itemMetaLabel}>×{item.quantity} · ${Number(item.unitPrice).toFixed(2)}</div>
@@ -836,7 +994,7 @@ function ItemRow({ item, isEditing, onToggleEdit, onClose, onUpdate, onEditChang
   const priceDisplay = priceFocused ? priceStr : `$${parseFloat(priceStr || '0').toFixed(2)}`;
 
   return (
-    <div ref={rowRef} data-row="true" style={styles.itemRowEdit}>
+    <div ref={setNodeRef} data-row="true" style={{ ...styles.itemRowEdit, ...dragStyle }}>
       <input
         style={styles.itemNameInput}
         value={item.name}
@@ -892,6 +1050,61 @@ function TotalRow({ label, value, bold }) {
     <div style={styles.totalRow}>
       <span style={{ ...styles.totalLabel, fontWeight: bold ? 500 : 400, fontSize: bold ? '13px' : '12px' }}>{label}</span>
       <span style={{ ...styles.totalValue, fontWeight: bold ? 500 : 400, fontSize: bold ? '13px' : '12px' }}>${value.toFixed(2)}</span>
+    </div>
+  );
+}
+
+function TaxRow({ label, addLabel, tax, computedAmount, isEditing, onStartEdit, onChange, onRemove, onDone }) {
+  if (tax == null) {
+    return (
+      <button style={styles.addItemLink} onClick={onStartEdit}>{addLabel}</button>
+    );
+  }
+  if (!isEditing) {
+    const displayLabel = tax.percent != null ? `${label} (${tax.percent}%)` : label;
+    return (
+      <div style={{ ...styles.itemRow, cursor: 'pointer' }} onClick={onStartEdit}>
+        <div style={{ flex: 1 }}>
+          <div style={styles.itemName}>{displayLabel}</div>
+          <div style={styles.itemMetaLabel}>${Number(computedAmount).toFixed(2)}</div>
+        </div>
+        <button style={styles.editBtn} onClick={e => { e.stopPropagation(); onStartEdit(); }}>✎</button>
+      </div>
+    );
+  }
+  return (
+    <div style={styles.itemRowEdit}>
+      <div style={{ ...styles.itemName, marginBottom: '2px' }}>{label}</div>
+      <div style={styles.editRow}>
+        <span style={styles.editLabel}>Percent</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          min="0"
+          style={styles.priceInput}
+          value={tax.percent ?? ''}
+          placeholder="—"
+          onChange={e => onChange('percent', e.target.value)}
+        />
+      </div>
+      <div style={styles.editRow}>
+        <span style={styles.editLabel}>Amount</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          min="0"
+          style={styles.priceInput}
+          value={tax.amount ?? ''}
+          placeholder="—"
+          onChange={e => onChange('amount', e.target.value)}
+        />
+      </div>
+      <div style={styles.editActions}>
+        <button style={styles.deleteItemLink} onClick={onRemove}>Remove {label.toLowerCase()}</button>
+        <button style={styles.doneLink} onClick={onDone}>Done</button>
+      </div>
     </div>
   );
 }
@@ -956,6 +1169,19 @@ const styles = {
     borderBottom: '0.5px solid var(--border-color)',
     backgroundColor: 'var(--bg-primary)',
     gap: '8px',
+  },
+  dragHandle: {
+    background: 'none',
+    border: 'none',
+    padding: '4px 2px',
+    fontSize: '14px',
+    color: 'var(--text-tertiary)',
+    cursor: 'grab',
+    touchAction: 'none',
+    lineHeight: 1,
+    letterSpacing: '-2px',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    flexShrink: 0,
   },
   itemRowEdit: {
     display: 'flex',
@@ -1053,6 +1279,19 @@ const styles = {
     fontFamily: 'system-ui, -apple-system, sans-serif',
     padding: '0',
     textAlign: 'left',
+  },
+  editActions: {
+    display: 'flex',
+    justifyContent: 'space-between',
+  },
+  doneLink: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '12px',
+    color: 'var(--text-secondary)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    padding: 0,
   },
   addItemLink: {
     display: 'block',

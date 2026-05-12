@@ -4,6 +4,9 @@ import { useNavigation } from '../context/NavigationContext';
 import {
   doc, getDocs, collection, updateDoc, deleteDoc, writeBatch, addDoc, serverTimestamp,
 } from 'firebase/firestore';
+import { DndContext, PointerSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
+import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { db } from '../firebase';
 import PageContainer from '../components/PageContainer';
 import SkeletonBlock from '../components/SkeletonBlock';
@@ -41,12 +44,31 @@ export default function EditItems() {
   const [deletedItemIds, setDeletedItemIds] = useState({}); // { [venueId]: Set<firestoreId> }
   const [deletedVenueIds, setDeletedVenueIds] = useState(() => new Set());
   const [editingKey, setEditingKey] = useState(null);
+  const [taxEditingKey, setTaxEditingKey] = useState(null); // `${venueId}_gst` | `${venueId}_sc` | null
   const [editingVenueNameId, setEditingVenueNameId] = useState(null);
   const [editingVenueNameValue, setEditingVenueNameValue] = useState('');
   const [deleteConfirmVenueId, setDeleteConfirmVenueId] = useState(null);
   const [rescanStep, setRescanStep] = useState(0);
 
   const hasExplicitlyClearedRef = useRef(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleVenueDragEnd(venueId, event) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setVenues(prev => prev.map(v => {
+      if (v.id !== venueId) return v;
+      const oldIdx = v.items.findIndex(it => it.id === active.id);
+      const newIdx = v.items.findIndex(it => it.id === over.id);
+      if (oldIdx < 0 || newIdx < 0) return v;
+      return { ...v, items: arrayMove(v.items, oldIdx, newIdx) };
+    }));
+  }
 
   useEffect(() => {
     async function load() {
@@ -62,21 +84,24 @@ export default function EditItems() {
             ...vDoc.data(),
             isRenamed: false,
             isNew: false,
-            items: itemsSnap.docs.map(d => {
-              const base = {
-                firestoreId: d.id,
-                id: d.id,
-                name: d.data().name ?? '',
-                quantity: d.data().quantity ?? 1,
-                unitPrice: d.data().unitPrice ?? 0,
-                originalQuantity: d.data().quantity ?? 1,
-              };
-              if (isTransport) {
-                const { from, to } = parseCabName(base.name);
-                return { ...base, _from: from, _to: to };
-              }
-              return base;
-            }),
+            items: itemsSnap.docs
+              .map(d => {
+                const base = {
+                  firestoreId: d.id,
+                  id: d.id,
+                  name: d.data().name ?? '',
+                  quantity: d.data().quantity ?? 1,
+                  unitPrice: d.data().unitPrice ?? 0,
+                  originalQuantity: d.data().quantity ?? 1,
+                  order: d.data().order ?? 9999,
+                };
+                if (isTransport) {
+                  const { from, to } = parseCabName(base.name);
+                  return { ...base, _from: from, _to: to };
+                }
+                return base;
+              })
+              .sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999)),
           };
         })
       );
@@ -105,6 +130,47 @@ export default function EditItems() {
         items: v.items.map(i => i.id === itemId ? { ...i, [field]: value } : i),
       }
     ));
+  }
+
+  function updateVenueTaxField(venueId, taxKey, field, value) {
+    const percentKey = taxKey === 'gst' ? 'gstPercent' : 'serviceChargePercent';
+    const amountKey = taxKey === 'gst' ? 'gstAmount' : 'serviceChargeAmount';
+    const targetKey = field === 'percent' ? percentKey : amountKey;
+    const parsed = value === '' ? null : Number(value);
+    setVenues(prev => prev.map(v =>
+      v.id !== venueId ? v : { ...v, [targetKey]: parsed }
+    ));
+  }
+
+  function addVenueTax(venueId, taxKey) {
+    const amountKey = taxKey === 'gst' ? 'gstAmount' : 'serviceChargeAmount';
+    setVenues(prev => prev.map(v =>
+      v.id !== venueId ? v : { ...v, [amountKey]: 0 }
+    ));
+    setTaxEditingKey(`${venueId}_${taxKey}`);
+  }
+
+  function removeVenueTax(venueId, taxKey) {
+    const percentKey = taxKey === 'gst' ? 'gstPercent' : 'serviceChargePercent';
+    const amountKey = taxKey === 'gst' ? 'gstAmount' : 'serviceChargeAmount';
+    setVenues(prev => prev.map(v =>
+      v.id !== venueId ? v : { ...v, [percentKey]: null, [amountKey]: null }
+    ));
+    setTaxEditingKey(null);
+  }
+
+  function venueGstAmount(v) {
+    if (v.gstAmount == null && v.gstPercent == null) return null;
+    if (v.gstAmount != null) return Number(v.gstAmount);
+    const subtotal = v.items.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0), 0);
+    return subtotal * Number(v.gstPercent || 0) / 100;
+  }
+
+  function venueScAmount(v) {
+    if (v.serviceChargeAmount == null && v.serviceChargePercent == null) return null;
+    if (v.serviceChargeAmount != null) return Number(v.serviceChargeAmount);
+    const subtotal = v.items.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unitPrice || 0), 0);
+    return subtotal * Number(v.serviceChargePercent || 0) / 100;
   }
 
   function updateCabField(venueId, itemId, field, value) {
@@ -220,26 +286,34 @@ export default function EditItems() {
           const newVenueRef = doc(collection(db, 'sessions', sessionId, 'venues'));
           batch.set(newVenueRef, {
             name: venue.name.trim(),
-            gstPercent: null, gstAmount: 0,
-            serviceChargePercent: null, serviceChargeAmount: 0,
+            gstPercent: venue.gstPercent ?? null,
+            gstAmount: venue.gstAmount == null ? 0 : Number(venue.gstAmount),
+            serviceChargePercent: venue.serviceChargePercent ?? null,
+            serviceChargeAmount: venue.serviceChargeAmount == null ? 0 : Number(venue.serviceChargeAmount),
             receiptTotal: 0, order: 999,
             createdAt: serverTimestamp(),
           });
-          for (const item of venue.items.filter(i => i.name.trim())) {
+          const validNewVenueItems = venue.items.filter(i => i.name.trim());
+          validNewVenueItems.forEach((item, idx) => {
             batch.set(doc(collection(db, 'sessions', sessionId, 'venues', newVenueRef.id, 'items')), {
               name: item.name.trim(),
               quantity: Number(item.quantity) || 1,
               unitPrice: Number(item.unitPrice) || 0,
               totalPrice: (Number(item.quantity) || 1) * (Number(item.unitPrice) || 0),
+              order: idx,
             });
-          }
+          });
           continue;
         }
 
-        // Rename existing venue
-        if (venue.isRenamed && venue.name.trim()) {
-          batch.update(doc(db, 'sessions', sessionId, 'venues', venue.id), { name: venue.name.trim() });
-        }
+        // Update existing venue: name (if renamed) + tax fields
+        const venueUpdates = {};
+        if (venue.isRenamed && venue.name.trim()) venueUpdates.name = venue.name.trim();
+        venueUpdates.gstPercent = venue.gstPercent ?? null;
+        venueUpdates.gstAmount = venue.gstAmount == null ? null : Number(venue.gstAmount);
+        venueUpdates.serviceChargePercent = venue.serviceChargePercent ?? null;
+        venueUpdates.serviceChargeAmount = venue.serviceChargeAmount == null ? null : Number(venue.serviceChargeAmount);
+        batch.update(doc(db, 'sessions', sessionId, 'venues', venue.id), venueUpdates);
 
         const deletedIds = deletedItemIds[venue.id] ?? new Set();
 
@@ -249,15 +323,16 @@ export default function EditItems() {
           itemClaims.forEach(c => batch.delete(doc(db, 'sessions', sessionId, 'claims', c.id)));
         }
 
-        for (const item of venue.items) {
+        venue.items.forEach((item, idx) => {
           if (!item.firestoreId) {
-            if (!item.name.trim()) continue;
+            if (!item.name.trim()) return;
             const newRef = doc(collection(db, 'sessions', sessionId, 'venues', venue.id, 'items'));
             batch.set(newRef, {
               name: item.name.trim(),
               quantity: Number(item.quantity) || 1,
               unitPrice: Number(item.unitPrice) || 0,
               totalPrice: (Number(item.quantity) || 1) * (Number(item.unitPrice) || 0),
+              order: idx,
             });
           } else {
             const itemClaims = allClaims.filter(c => c.itemId === item.firestoreId);
@@ -275,9 +350,10 @@ export default function EditItems() {
               quantity: newQty,
               unitPrice: Number(item.unitPrice) || 0,
               totalPrice: newQty * (Number(item.unitPrice) || 0),
+              order: idx,
             });
           }
-        }
+        });
       }
 
       // Add new cabs to Transport venue
@@ -475,68 +551,58 @@ export default function EditItems() {
               </>
             ) : (
               <>
-                {venue.items.map(item => {
-                  const key = `${venue.id}_${item.id}`;
-                  const isEditing = editingKey === key;
-
-                  if (!isEditing) {
-                    return (
-                      <div key={item.id} style={st.itemRow} onClick={() => setEditingKey(key)}>
-                        <div style={{ flex: 1 }}>
-                          <div style={st.itemName}>{item.name || 'Unnamed item'}</div>
-                          <div style={st.itemMeta}>×{item.quantity} · ${Number(item.unitPrice).toFixed(2)}</div>
-                        </div>
-                        <button style={st.editBtn} onClick={e => { e.stopPropagation(); setEditingKey(key); }}>✎</button>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={item.id} style={st.itemRowEdit}>
-                      <input
-                        autoFocus
-                        style={st.itemNameInput}
-                        value={item.name}
-                        onChange={e => updateItem(venue.id, item.id, 'name', e.target.value)}
-                        placeholder="Item name"
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={e => handleVenueDragEnd(venue.id, e)}>
+                  <SortableContext items={venue.items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+                    {venue.items.map(item => (
+                      <SortableEditItem
+                        key={item.id}
+                        item={item}
+                        isEditing={editingKey === `${venue.id}_${item.id}`}
+                        onStartEdit={() => setEditingKey(`${venue.id}_${item.id}`)}
+                        onUpdate={(field, val) => updateItem(venue.id, item.id, field, val)}
+                        onDelete={() => deleteItem(venue.id, item.id)}
+                        onDone={() => setEditingKey(null)}
                       />
-                      <div style={st.editRow}>
-                        <span style={st.editLabel}>Qty</span>
-                        <div style={st.qtyControls}>
-                          <button
-                            style={{ ...st.qtyBtn, opacity: item.quantity <= 1 ? 0.25 : 1 }}
-                            onClick={() => { const q = Number(item.quantity) - 1; if (q >= 1) updateItem(venue.id, item.id, 'quantity', q); }}
-                          >−</button>
-                          <span style={st.qtyCount}>{item.quantity}</span>
-                          <button
-                            style={st.qtyBtn}
-                            onClick={() => updateItem(venue.id, item.id, 'quantity', Number(item.quantity) + 1)}
-                          >+</button>
-                        </div>
-                      </div>
-                      <div style={st.editRow}>
-                        <span style={st.editLabel}>Unit price</span>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          style={st.priceInput}
-                          value={item.unitPrice}
-                          onChange={e => updateItem(venue.id, item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
-                        />
-                      </div>
-                      <div style={st.editActions}>
-                        <button style={st.deleteLink} onClick={() => deleteItem(venue.id, item.id)}>Delete item</button>
-                        <button style={st.doneLink} onClick={() => setEditingKey(null)}>Done</button>
-                      </div>
-                    </div>
-                  );
-                })}
+                    ))}
+                  </SortableContext>
+                </DndContext>
 
                 <button style={st.addItemLink} onClick={() => addItem(venue.id)}>
                   + Add item to {venue.name || 'venue'}
                 </button>
+
+                <TaxRow
+                  label="GST"
+                  addLabel="+ Add GST"
+                  percent={venue.gstPercent}
+                  amount={venue.gstAmount}
+                  computedAmount={venueGstAmount(venue)}
+                  isEditing={taxEditingKey === `${venue.id}_gst`}
+                  onStartEdit={() => {
+                    const present = venue.gstPercent != null || (venue.gstAmount != null && venue.gstAmount !== 0);
+                    if (!present) addVenueTax(venue.id, 'gst');
+                    else setTaxEditingKey(`${venue.id}_gst`);
+                  }}
+                  onChange={(field, val) => updateVenueTaxField(venue.id, 'gst', field, val)}
+                  onRemove={() => removeVenueTax(venue.id, 'gst')}
+                  onDone={() => setTaxEditingKey(null)}
+                />
+                <TaxRow
+                  label="Service charge"
+                  addLabel="+ Add service charge"
+                  percent={venue.serviceChargePercent}
+                  amount={venue.serviceChargeAmount}
+                  computedAmount={venueScAmount(venue)}
+                  isEditing={taxEditingKey === `${venue.id}_sc`}
+                  onStartEdit={() => {
+                    const present = venue.serviceChargePercent != null || (venue.serviceChargeAmount != null && venue.serviceChargeAmount !== 0);
+                    if (!present) addVenueTax(venue.id, 'sc');
+                    else setTaxEditingKey(`${venue.id}_sc`);
+                  }}
+                  onChange={(field, val) => updateVenueTaxField(venue.id, 'sc', field, val)}
+                  onRemove={() => removeVenueTax(venue.id, 'sc')}
+                  onDone={() => setTaxEditingKey(null)}
+                />
               </>
             )}
           </div>
@@ -613,6 +679,133 @@ export default function EditItems() {
   );
 }
 
+function TaxRow({ label, addLabel, percent, amount, computedAmount, isEditing, onStartEdit, onChange, onRemove, onDone }) {
+  const isPresent = percent != null || (amount != null && amount !== 0);
+  if (!isPresent) {
+    return <button style={st.addItemLink} onClick={onStartEdit}>{addLabel}</button>;
+  }
+  if (!isEditing) {
+    const displayLabel = percent != null ? `${label} (${percent}%)` : label;
+    const shown = computedAmount != null ? Number(computedAmount).toFixed(2) : '0.00';
+    return (
+      <div style={st.itemRow} onClick={onStartEdit}>
+        <div style={{ flex: 1 }}>
+          <div style={st.itemName}>{displayLabel}</div>
+          <div style={st.itemMeta}>${shown}</div>
+        </div>
+        <button style={st.editBtn} onClick={e => { e.stopPropagation(); onStartEdit(); }}>✎</button>
+      </div>
+    );
+  }
+  return (
+    <div style={st.itemRowEdit}>
+      <div style={{ ...st.itemName, marginBottom: '2px' }}>{label}</div>
+      <div style={st.editRow}>
+        <span style={st.editLabel}>Percent</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          min="0"
+          style={st.priceInput}
+          value={percent ?? ''}
+          placeholder="—"
+          onChange={e => onChange('percent', e.target.value)}
+        />
+      </div>
+      <div style={st.editRow}>
+        <span style={st.editLabel}>Amount</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          min="0"
+          style={st.priceInput}
+          value={amount ?? ''}
+          placeholder="—"
+          onChange={e => onChange('amount', e.target.value)}
+        />
+      </div>
+      <div style={st.editActions}>
+        <button style={st.deleteLink} onClick={onRemove}>Remove {label.toLowerCase()}</button>
+        <button style={st.doneLink} onClick={onDone}>Done</button>
+      </div>
+    </div>
+  );
+}
+
+function SortableEditItem({ item, isEditing, onStartEdit, onUpdate, onDelete, onDone }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id, disabled: isEditing });
+  const dragStyle = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : 'auto',
+    position: 'relative',
+  };
+
+  if (!isEditing) {
+    return (
+      <div ref={setNodeRef} style={{ ...st.itemRow, ...dragStyle }} onClick={onStartEdit}>
+        <button
+          {...attributes}
+          {...listeners}
+          style={st.dragHandle}
+          aria-label="Drag to reorder"
+          onClick={e => e.stopPropagation()}
+        >⋮⋮</button>
+        <div style={{ flex: 1 }}>
+          <div style={st.itemName}>{item.name || 'Unnamed item'}</div>
+          <div style={st.itemMeta}>×{item.quantity} · ${Number(item.unitPrice).toFixed(2)}</div>
+        </div>
+        <button style={st.editBtn} onClick={e => { e.stopPropagation(); onStartEdit(); }}>✎</button>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={setNodeRef} style={{ ...st.itemRowEdit, ...dragStyle }}>
+      <input
+        autoFocus
+        style={st.itemNameInput}
+        value={item.name}
+        onChange={e => onUpdate('name', e.target.value)}
+        placeholder="Item name"
+      />
+      <div style={st.editRow}>
+        <span style={st.editLabel}>Qty</span>
+        <div style={st.qtyControls}>
+          <button
+            style={{ ...st.qtyBtn, opacity: item.quantity <= 1 ? 0.25 : 1 }}
+            onClick={() => { const q = Number(item.quantity) - 1; if (q >= 1) onUpdate('quantity', q); }}
+          >−</button>
+          <span style={st.qtyCount}>{item.quantity}</span>
+          <button
+            style={st.qtyBtn}
+            onClick={() => onUpdate('quantity', Number(item.quantity) + 1)}
+          >+</button>
+        </div>
+      </div>
+      <div style={st.editRow}>
+        <span style={st.editLabel}>Unit price</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          step="0.01"
+          min="0"
+          style={st.priceInput}
+          value={item.unitPrice}
+          onChange={e => onUpdate('unitPrice', parseFloat(e.target.value) || 0)}
+        />
+      </div>
+      <div style={st.editActions}>
+        <button style={st.deleteLink} onClick={onDelete}>Delete item</button>
+        <button style={st.doneLink} onClick={onDone}>Done</button>
+      </div>
+    </div>
+  );
+}
+
 const st = {
   header: { marginBottom: '20px' },
   title: { fontSize: '20px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif' },
@@ -625,6 +818,7 @@ const st = {
   rescanVenueBtn: { background: 'none', border: 'none', fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', padding: '0', textDecoration: 'underline', flexShrink: 0 },
   deleteVenueBtn: { background: 'none', border: 'none', fontSize: '11px', color: 'var(--color-danger)', fontFamily: 'system-ui, -apple-system, sans-serif', cursor: 'pointer', padding: '0', flexShrink: 0 },
   itemRow: { display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '0.5px solid var(--border-color)', backgroundColor: 'var(--bg-primary)', cursor: 'pointer', gap: '8px' },
+  dragHandle: { background: 'none', border: 'none', padding: '4px 2px', fontSize: '14px', color: 'var(--text-tertiary)', cursor: 'grab', touchAction: 'none', lineHeight: 1, letterSpacing: '-2px', fontFamily: 'system-ui, -apple-system, sans-serif', flexShrink: 0 },
   itemRowEdit: { display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px 14px', borderBottom: '0.5px solid var(--border-color)', backgroundColor: 'var(--bg-primary)' },
   itemName: { fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)', fontFamily: 'system-ui, -apple-system, sans-serif', marginBottom: '2px' },
   itemMeta: { fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'system-ui, -apple-system, sans-serif' },

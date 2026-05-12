@@ -168,7 +168,8 @@ export default function ClaimItems() {
           itemsSnap => {
             itemDataMap[vDoc.id] = itemsSnap.docs
               .map(d => ({ id: d.id, ...d.data() }))
-              .filter(i => (i.unitPrice ?? 0) > 0);
+              .filter(i => (i.unitPrice ?? 0) > 0)
+              .sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
             rebuildVenues(venuesSnap.docs);
           }
         );

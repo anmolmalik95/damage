@@ -59,7 +59,9 @@ export default function JoiningScreen() {
           return {
             id: vDoc.id,
             ...vDoc.data(),
-            items: itemsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+            items: itemsSnap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999)),
           };
         })
       );
