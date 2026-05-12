@@ -647,7 +647,7 @@ export default function Breakdown() {
                             {data.sc > 0.005 && (
                               <div style={s.taxRow}>
                                 <span style={s.taxLabel}>
-                                  Service charge{venue.serviceChargePercent != null ? ` (${venue.serviceChargePercent}%)` : ''}
+                                  Service Charge{venue.serviceChargePercent != null ? ` (${venue.serviceChargePercent}%)` : ''}
                                 </span>
                                 <span style={s.taxAmt}>${data.sc.toFixed(2)}</span>
                               </div>

@@ -147,6 +147,12 @@ export default function EditItems() {
     setVenues(prev => prev.map(v =>
       v.id !== venueId ? v : { ...v, [amountKey]: 0 }
     ));
+    setEditingKey(null);
+    setTaxEditingKey(`${venueId}_${taxKey}`);
+  }
+
+  function openTaxEdit(venueId, taxKey) {
+    setEditingKey(null);
     setTaxEditingKey(`${venueId}_${taxKey}`);
   }
 
@@ -213,6 +219,7 @@ export default function EditItems() {
       }
     ));
     setEditingKey(`${venueId}_${newId}`);
+    setTaxEditingKey(null);
   }
 
   function addNewCab() {
@@ -558,7 +565,7 @@ export default function EditItems() {
                         key={item.id}
                         item={item}
                         isEditing={editingKey === `${venue.id}_${item.id}`}
-                        onStartEdit={() => setEditingKey(`${venue.id}_${item.id}`)}
+                        onStartEdit={() => { setEditingKey(`${venue.id}_${item.id}`); setTaxEditingKey(null); }}
                         onUpdate={(field, val) => updateItem(venue.id, item.id, field, val)}
                         onDelete={() => deleteItem(venue.id, item.id)}
                         onDone={() => setEditingKey(null)}
@@ -581,15 +588,15 @@ export default function EditItems() {
                   onStartEdit={() => {
                     const present = venue.gstPercent != null || (venue.gstAmount != null && venue.gstAmount !== 0);
                     if (!present) addVenueTax(venue.id, 'gst');
-                    else setTaxEditingKey(`${venue.id}_gst`);
+                    else openTaxEdit(venue.id, 'gst');
                   }}
                   onChange={(field, val) => updateVenueTaxField(venue.id, 'gst', field, val)}
                   onRemove={() => removeVenueTax(venue.id, 'gst')}
                   onDone={() => setTaxEditingKey(null)}
                 />
                 <TaxRow
-                  label="Service charge"
-                  addLabel="+ Add service charge"
+                  label="Service Charge"
+                  addLabel="+ Add Service Charge"
                   percent={venue.serviceChargePercent}
                   amount={venue.serviceChargeAmount}
                   computedAmount={venueScAmount(venue)}
@@ -597,7 +604,7 @@ export default function EditItems() {
                   onStartEdit={() => {
                     const present = venue.serviceChargePercent != null || (venue.serviceChargeAmount != null && venue.serviceChargeAmount !== 0);
                     if (!present) addVenueTax(venue.id, 'sc');
-                    else setTaxEditingKey(`${venue.id}_sc`);
+                    else openTaxEdit(venue.id, 'sc');
                   }}
                   onChange={(field, val) => updateVenueTaxField(venue.id, 'sc', field, val)}
                   onRemove={() => removeVenueTax(venue.id, 'sc')}
@@ -680,6 +687,20 @@ export default function EditItems() {
 }
 
 function TaxRow({ label, addLabel, percent, amount, computedAmount, isEditing, onStartEdit, onChange, onRemove, onDone }) {
+  useEffect(() => {
+    if (!isEditing) return;
+    function outside(e) {
+      if (e.target.closest('[data-row]')) return;
+      onDone();
+    }
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('touchstart', outside);
+    return () => {
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('touchstart', outside);
+    };
+  }, [isEditing, onDone]);
+
   const isPresent = percent != null || (amount != null && amount !== 0);
   if (!isPresent) {
     return <button style={st.addItemLink} onClick={onStartEdit}>{addLabel}</button>;
@@ -688,7 +709,7 @@ function TaxRow({ label, addLabel, percent, amount, computedAmount, isEditing, o
     const displayLabel = percent != null ? `${label} (${percent}%)` : label;
     const shown = computedAmount != null ? Number(computedAmount).toFixed(2) : '0.00';
     return (
-      <div style={st.itemRow} onClick={onStartEdit}>
+      <div data-row="true" style={st.itemRow} onClick={onStartEdit}>
         <div style={{ flex: 1 }}>
           <div style={st.itemName}>{displayLabel}</div>
           <div style={st.itemMeta}>${shown}</div>
@@ -698,7 +719,7 @@ function TaxRow({ label, addLabel, percent, amount, computedAmount, isEditing, o
     );
   }
   return (
-    <div style={st.itemRowEdit}>
+    <div data-row="true" style={st.itemRowEdit}>
       <div style={{ ...st.itemName, marginBottom: '2px' }}>{label}</div>
       <div style={st.editRow}>
         <span style={st.editLabel}>Percent</span>
@@ -727,7 +748,7 @@ function TaxRow({ label, addLabel, percent, amount, computedAmount, isEditing, o
         />
       </div>
       <div style={st.editActions}>
-        <button style={st.deleteLink} onClick={onRemove}>Remove {label.toLowerCase()}</button>
+        <button style={st.deleteLink} onClick={onRemove}>Remove {label}</button>
         <button style={st.doneLink} onClick={onDone}>Done</button>
       </div>
     </div>
@@ -746,7 +767,7 @@ function SortableEditItem({ item, isEditing, onStartEdit, onUpdate, onDelete, on
 
   if (!isEditing) {
     return (
-      <div ref={setNodeRef} style={{ ...st.itemRow, ...dragStyle }} onClick={onStartEdit}>
+      <div ref={setNodeRef} data-row="true" style={{ ...st.itemRow, ...dragStyle }} onClick={onStartEdit}>
         <button
           {...attributes}
           {...listeners}
@@ -764,7 +785,7 @@ function SortableEditItem({ item, isEditing, onStartEdit, onUpdate, onDelete, on
   }
 
   return (
-    <div ref={setNodeRef} style={{ ...st.itemRowEdit, ...dragStyle }}>
+    <div ref={setNodeRef} data-row="true" style={{ ...st.itemRowEdit, ...dragStyle }}>
       <input
         autoFocus
         style={st.itemNameInput}

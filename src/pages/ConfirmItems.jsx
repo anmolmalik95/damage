@@ -245,6 +245,7 @@ export default function ConfirmItems() {
       }
     ));
     setEditingKey(`${vi}_${newId}`);
+    setTaxEditingKey(null);
   }
 
   function handleVenueDragEnd(vi, event) {
@@ -273,6 +274,8 @@ export default function ConfirmItems() {
   function toggleEdit(vi, itemId) {
     const key = `${vi}_${itemId}`;
     setEditingKey(prev => prev === key ? null : key);
+    setTaxEditingKey(null);
+    setSheetTaxEditingKey(null);
   }
 
   function handleEditChange(field, value) {
@@ -295,11 +298,17 @@ export default function ConfirmItems() {
     }));
   }
 
+  function openTaxEdit(vi, taxKey) {
+    setEditingKey(null);
+    setTaxEditingKey(`${vi}_${taxKey}`);
+  }
+
   function addVenueTax(vi, taxKey) {
     const key = taxKey === 'gst' ? 'gst' : 'serviceCharge';
     setVenues(prev => prev.map((v, i) =>
       i !== vi ? v : { ...v, [key]: { present: true, percent: null, amount: 0 } }
     ));
+    setEditingKey(null);
     setTaxEditingKey(`${vi}_${taxKey}`);
   }
 
@@ -321,6 +330,12 @@ export default function ConfirmItems() {
   function addSheetTax(taxKey) {
     const setter = taxKey === 'gst' ? setNewVenueGst : setNewVenueSc;
     setter({ present: true, percent: null, amount: 0 });
+    setSheetEditingKey(null);
+    setSheetTaxEditingKey(taxKey);
+  }
+
+  function openSheetTaxEdit(taxKey) {
+    setSheetEditingKey(null);
     setSheetTaxEditingKey(taxKey);
   }
 
@@ -593,18 +608,18 @@ export default function ConfirmItems() {
                       tax={venue.gst}
                       computedAmount={venueGstAmount(venue)}
                       isEditing={taxEditingKey === `${vi}_gst`}
-                      onStartEdit={() => venue.gst == null ? addVenueTax(vi, 'gst') : setTaxEditingKey(`${vi}_gst`)}
+                      onStartEdit={() => venue.gst == null ? addVenueTax(vi, 'gst') : openTaxEdit(vi, 'gst')}
                       onChange={(field, val) => updateVenueTaxField(vi, 'gst', field, val)}
                       onRemove={() => removeVenueTax(vi, 'gst')}
                       onDone={() => setTaxEditingKey(null)}
                     />
                     <TaxRow
-                      label="Service charge"
-                      addLabel="+ Add service charge"
+                      label="Service Charge"
+                      addLabel="+ Add Service Charge"
                       tax={venue.serviceCharge}
                       computedAmount={venueScAmount(venue)}
                       isEditing={taxEditingKey === `${vi}_sc`}
-                      onStartEdit={() => venue.serviceCharge == null ? addVenueTax(vi, 'sc') : setTaxEditingKey(`${vi}_sc`)}
+                      onStartEdit={() => venue.serviceCharge == null ? addVenueTax(vi, 'sc') : openTaxEdit(vi, 'sc')}
                       onChange={(field, val) => updateVenueTaxField(vi, 'sc', field, val)}
                       onRemove={() => removeVenueTax(vi, 'sc')}
                       onDone={() => setTaxEditingKey(null)}
@@ -622,7 +637,7 @@ export default function ConfirmItems() {
                   )}
                   {venue.serviceCharge != null && (
                     <TotalRow
-                      label={venue.serviceCharge.percent != null ? `Service charge (${venue.serviceCharge.percent}%)` : 'Service charge'}
+                      label={venue.serviceCharge.percent != null ? `Service Charge (${venue.serviceCharge.percent}%)` : 'Service Charge'}
                       value={venueScAmount(venue)}
                     />
                   )}
@@ -819,7 +834,7 @@ export default function ConfirmItems() {
                           key={item.id}
                           item={item}
                           isEditing={sheetEditingKey === String(item.id)}
-                          onToggleEdit={() => setSheetEditingKey(p => p === String(item.id) ? null : String(item.id))}
+                          onToggleEdit={() => { setSheetEditingKey(p => p === String(item.id) ? null : String(item.id)); setSheetTaxEditingKey(null); }}
                           onUpdate={(field, val) => setNewVenueItems(p => p.map(i => i.id === item.id ? { ...i, [field]: val } : i))}
                           onEditChange={(f, v) => { sheetEditValuesRef.current = { ...sheetEditValuesRef.current, [f]: v }; }}
                           onDelete={() => { setNewVenueItems(p => p.filter(i => i.id !== item.id)); setSheetEditingKey(null); }}
@@ -832,6 +847,7 @@ export default function ConfirmItems() {
                     const newId = Date.now();
                     setNewVenueItems(p => [...p, { id: newId, name: '', quantity: 1, unitPrice: 0 }]);
                     setSheetEditingKey(String(newId));
+                    setSheetTaxEditingKey(null);
                   }}>
                     + Add item to {newVenueName}
                   </button>
@@ -842,18 +858,18 @@ export default function ConfirmItems() {
                     tax={newVenueGst}
                     computedAmount={sheetGstAmount()}
                     isEditing={sheetTaxEditingKey === 'gst'}
-                    onStartEdit={() => newVenueGst == null ? addSheetTax('gst') : setSheetTaxEditingKey('gst')}
+                    onStartEdit={() => newVenueGst == null ? addSheetTax('gst') : openSheetTaxEdit('gst')}
                     onChange={(field, val) => updateSheetTaxField('gst', field, val)}
                     onRemove={() => removeSheetTax('gst')}
                     onDone={() => setSheetTaxEditingKey(null)}
                   />
                   <TaxRow
-                    label="Service charge"
-                    addLabel="+ Add service charge"
+                    label="Service Charge"
+                    addLabel="+ Add Service Charge"
                     tax={newVenueSc}
                     computedAmount={sheetScAmount()}
                     isEditing={sheetTaxEditingKey === 'sc'}
-                    onStartEdit={() => newVenueSc == null ? addSheetTax('sc') : setSheetTaxEditingKey('sc')}
+                    onStartEdit={() => newVenueSc == null ? addSheetTax('sc') : openSheetTaxEdit('sc')}
                     onChange={(field, val) => updateSheetTaxField('sc', field, val)}
                     onRemove={() => removeSheetTax('sc')}
                     onDone={() => setSheetTaxEditingKey(null)}
@@ -869,7 +885,7 @@ export default function ConfirmItems() {
                     )}
                     {newVenueSc != null && (
                       <TotalRow
-                        label={newVenueSc.percent != null ? `Service charge (${newVenueSc.percent}%)` : 'Service charge'}
+                        label={newVenueSc.percent != null ? `Service Charge (${newVenueSc.percent}%)` : 'Service Charge'}
                         value={sheetScAmount()}
                       />
                     )}
@@ -1055,6 +1071,20 @@ function TotalRow({ label, value, bold }) {
 }
 
 function TaxRow({ label, addLabel, tax, computedAmount, isEditing, onStartEdit, onChange, onRemove, onDone }) {
+  useEffect(() => {
+    if (!isEditing) return;
+    function outside(e) {
+      if (e.target.closest('[data-row]')) return;
+      onDone();
+    }
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('touchstart', outside);
+    return () => {
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('touchstart', outside);
+    };
+  }, [isEditing, onDone]);
+
   if (tax == null) {
     return (
       <button style={styles.addItemLink} onClick={onStartEdit}>{addLabel}</button>
@@ -1063,7 +1093,7 @@ function TaxRow({ label, addLabel, tax, computedAmount, isEditing, onStartEdit, 
   if (!isEditing) {
     const displayLabel = tax.percent != null ? `${label} (${tax.percent}%)` : label;
     return (
-      <div style={{ ...styles.itemRow, cursor: 'pointer' }} onClick={onStartEdit}>
+      <div data-row="true" style={{ ...styles.itemRow, cursor: 'pointer' }} onClick={onStartEdit}>
         <div style={{ flex: 1 }}>
           <div style={styles.itemName}>{displayLabel}</div>
           <div style={styles.itemMetaLabel}>${Number(computedAmount).toFixed(2)}</div>
@@ -1073,7 +1103,7 @@ function TaxRow({ label, addLabel, tax, computedAmount, isEditing, onStartEdit, 
     );
   }
   return (
-    <div style={styles.itemRowEdit}>
+    <div data-row="true" style={styles.itemRowEdit}>
       <div style={{ ...styles.itemName, marginBottom: '2px' }}>{label}</div>
       <div style={styles.editRow}>
         <span style={styles.editLabel}>Percent</span>
@@ -1102,7 +1132,7 @@ function TaxRow({ label, addLabel, tax, computedAmount, isEditing, onStartEdit, 
         />
       </div>
       <div style={styles.editActions}>
-        <button style={styles.deleteItemLink} onClick={onRemove}>Remove {label.toLowerCase()}</button>
+        <button style={styles.deleteItemLink} onClick={onRemove}>Remove {label}</button>
         <button style={styles.doneLink} onClick={onDone}>Done</button>
       </div>
     </div>
