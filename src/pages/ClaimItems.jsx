@@ -751,19 +751,21 @@ export default function ClaimItems() {
                     </>
                   ) : (
                     <>
-                      <div style={s.itemTopRow}>
+                      <div style={s.itemLeftMobile}>
                         <span style={s.itemName}>{item.name}</span>
+                        <div style={s.itemAttribution}>{attributionLine}</div>
+                      </div>
+                      <div style={s.itemRightStack}>
                         {canExpand && (
                           <span style={s.chevronTop} aria-hidden="false">
                             {isExpanded ? '⌄' : '›'}
                           </span>
                         )}
-                      </div>
-                      <div style={s.itemBottomRow}>
-                        <div style={s.itemAttributionStacked}>{attributionLine}</div>
-                        <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
-                        {splitPill}
-                        {qtyControls}
+                        <div style={s.itemControlsRow}>
+                          <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
+                          {splitPill}
+                          {qtyControls}
+                        </div>
                       </div>
                     </>
                   )}
@@ -1373,22 +1375,20 @@ const s = {
     gap: '8px',
   },
   itemRowStacked: {
-    display: 'flex', flexDirection: 'column', gap: '6px',
+    display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px',
     padding: '10px 12px 10px 14px', borderBottom: '0.5px solid var(--border-color)',
     backgroundColor: 'var(--bg-primary)',
   },
-  itemTopRow: {
-    display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0,
-  },
-  itemBottomRow: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    gap: '8px', minWidth: 0,
-  },
-  itemAttributionStacked: {
-    fontSize: '11px', color: 'var(--text-secondary)',
-    fontFamily: 'system-ui, -apple-system, sans-serif',
-    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  itemLeftMobile: {
+    display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '2px',
     flex: 1, minWidth: 0,
+  },
+  itemRightStack: {
+    display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px',
+    flexShrink: 0,
+  },
+  itemControlsRow: {
+    display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0,
   },
   itemLeft: { display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '2px', flex: 1, minWidth: 0 },
   itemNameRow: { display: 'flex', alignItems: 'center', gap: '8px' },
