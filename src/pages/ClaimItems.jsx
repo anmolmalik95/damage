@@ -714,11 +714,9 @@ export default function ClaimItems() {
                   style={{ ...s.ctrlBtn, opacity: (allClaimed || isDoneClaiming) ? 0.25 : 1 }}
                   onClick={e => { e.stopPropagation(); !isDoneClaiming && !allClaimed && handleClaim(item); }}
                 >+</span>
-                {canExpand && (
-                  <span style={s.chevron}>
-                    {isExpanded ? '⌄' : '›'}
-                  </span>
-                )}
+                <span style={{ ...s.chevron, visibility: canExpand ? 'visible' : 'hidden' }} aria-hidden={!canExpand}>
+                  {isExpanded ? '⌄' : '›'}
+                </span>
               </div>
             );
             const attributionLine = `$${(item.unitPrice ?? 0).toFixed(2)}${attribution ? ` · ${attribution}` : ''}`;
