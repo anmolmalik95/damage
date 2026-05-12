@@ -751,21 +751,18 @@ export default function ClaimItems() {
                     </>
                   ) : (
                     <>
-                      <div style={s.itemLeftMobile}>
-                        <span style={s.itemName}>{item.name}</span>
-                        <div style={s.itemAttribution}>{attributionLine}</div>
-                      </div>
-                      <div style={s.itemRightStack}>
-                        {canExpand && (
-                          <span style={s.chevronTop} aria-hidden="false">
-                            {isExpanded ? '⌄' : '›'}
-                          </span>
-                        )}
-                        <div style={s.itemControlsRow}>
-                          <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
-                          {splitPill}
-                          {qtyControls}
-                        </div>
+                      <span style={s.itemName}>{item.name}</span>
+                      <span
+                        style={{ ...s.chevronTop, justifySelf: 'end', visibility: canExpand ? 'visible' : 'hidden' }}
+                        aria-hidden={!canExpand}
+                      >
+                        {isExpanded ? '⌄' : '›'}
+                      </span>
+                      <div style={s.itemAttribution}>{attributionLine}</div>
+                      <div style={s.itemControlsRow}>
+                        <span style={claimTagStyle}>{totalClaimed}/{qty}</span>
+                        {splitPill}
+                        {qtyControls}
                       </div>
                     </>
                   )}
@@ -1375,17 +1372,10 @@ const s = {
     gap: '8px',
   },
   itemRowStacked: {
-    display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '10px',
+    display: 'grid', gridTemplateColumns: '1fr auto',
+    columnGap: '10px', rowGap: '0px', alignItems: 'center',
     padding: '10px 12px 10px 14px', borderBottom: '0.5px solid var(--border-color)',
     backgroundColor: 'var(--bg-primary)',
-  },
-  itemLeftMobile: {
-    display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '2px',
-    flex: 1, minWidth: 0,
-  },
-  itemRightStack: {
-    display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px',
-    flexShrink: 0,
   },
   itemControlsRow: {
     display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0,
